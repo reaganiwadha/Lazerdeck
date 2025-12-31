@@ -1,0 +1,27 @@
+# Build artifacts
+build/
+*.o
+*.obj
+a.out
+lazerdeck
+main
+*.exe
+
+# Debug files
+*.dSYM/
+*.pdb
+
+# Local databases
+*.db
+analysis.db
+
+# Editor/IDE files
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+
+# Temporary files
+tmp/
+*.log
