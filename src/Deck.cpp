@@ -283,10 +283,23 @@ void Deck::process(float* outputBuffer, unsigned long framesPerBuffer) {
         
         uint64_t fr = currentFrame.load(std::memory_order_relaxed);
         uint64_t frAvail = framesAvailable.load(std::memory_order_relaxed);
+        bool lActive = loopActive.load();
+        uint64_t lStart = loopStart.load();
+        uint64_t lEnd = loopEnd.load();
         bool final = false;
 
         size_t actualInput = needed;
-        if (fr + needed >= frAvail) {
+
+        if (lActive) {
+            if (fr >= lEnd) {
+                currentFrame.store(lStart);
+                currentInputTime = (double)lStart / (double)sampleRate;
+                continue;
+            }
+            if (fr + needed > lEnd) {
+                actualInput = lEnd - fr;
+            }
+        } else if (fr + needed >= frAvail) {
             if (!loading.load()) {
                 actualInput = (frAvail > fr) ? (frAvail - fr) : 0;
                 final = true;
@@ -315,7 +328,13 @@ void Deck::process(float* outputBuffer, unsigned long framesPerBuffer) {
 
             const float* inPtrs[2] = { scratchIn[0].data(), scratchIn[1].data() };
             stretcher->process(inPtrs, actualInput, final);
-            currentFrame.store(fr + actualInput, std::memory_order_relaxed);
+            
+            uint64_t nextFr = fr + actualInput;
+            if (lActive && nextFr >= lEnd) {
+                nextFr = lStart;
+                currentInputTime = (double)lStart / (double)sampleRate;
+            }
+            currentFrame.store(nextFr, std::memory_order_relaxed);
         } else {
             if (final) {
                 stretcher->process(nullptr, 0, true);
@@ -479,4 +498,62 @@ void Deck::updateVisualFrame() {
         lastVisualUpdateTime = 0;
         visualFrame.store(currentFrame.load());
     }
+}
+
+void Deck::setLoopStart() {
+    uint64_t current = currentFrame.load();
+    float b = bpm.load();
+    if (b > 0.0f) {
+        float offset = beatOffset.load();
+        double framesPerBeat = (double)sampleRate * 60.0 / (double)b;
+        int64_t beatIndex = (int64_t)std::round(((double)current - offset) / framesPerBeat);
+        uint64_t snapped = (uint64_t)std::max(0.0, (double)beatIndex * framesPerBeat + offset);
+        loopStart.store(snapped);
+        Logger::info("Loop Start set (snapped to beat " + std::to_string(beatIndex + 1) + ")");
+    } else {
+        loopStart.store(current);
+        Logger::info("Loop Start set (no BPM, unsnapped)");
+    }
+}
+
+void Deck::setLoopEnd() {
+    uint64_t current = currentFrame.load();
+    uint64_t start = loopStart.load();
+    float b = bpm.load();
+    uint64_t finalEnd = current;
+
+    if (b > 0.0f) {
+        float offset = beatOffset.load();
+        double framesPerBeat = (double)sampleRate * 60.0 / (double)b;
+        int64_t beatIndex = (int64_t)std::round(((double)current - offset) / framesPerBeat);
+        finalEnd = (uint64_t)std::max(0.0, (double)beatIndex * framesPerBeat + offset);
+        
+        // Ensure loop has length and end is after start
+        if (finalEnd <= start) {
+            // Force it to at least the next beat boundary
+            beatIndex = (int64_t)std::floor(((double)current - offset) / framesPerBeat) + 1;
+            finalEnd = (uint64_t)std::max(0.0, (double)beatIndex * framesPerBeat + offset);
+            
+            // If still not enough, fallback to 1 beat duration
+            if (finalEnd <= start) {
+                finalEnd = start + (uint64_t)framesPerBeat;
+            }
+        }
+        Logger::info("Loop End set (snapped to beat " + std::to_string(beatIndex + 1) + ")");
+    } else {
+        if (finalEnd <= start) {
+            Logger::warn("Loop End must be after Loop Start");
+            return;
+        }
+        Logger::info("Loop End set (no BPM, unsnapped)");
+    }
+
+    loopEnd.store(finalEnd);
+    loopActive.store(true);
+    Logger::info("Loop Active: " + std::to_string(start) + " -> " + std::to_string(finalEnd));
+}
+
+void Deck::exitLoop() {
+    loopActive.store(false);
+    Logger::info("Loop Exited");
 }

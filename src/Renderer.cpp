@@ -29,7 +29,7 @@ SDL_Texture* TextCache::get(const std::string& text, SDL_Color color, int fontSi
     }
     
     // Create new texture
-    TTF_Font* f = (fontSize == 12 && font != nullptr) ? font : font;
+    TTF_Font* f = font;
     if (!f) return nullptr;
     
     SDL_Surface* surface = TTF_RenderText_Blended(f, text.c_str(), color);
@@ -501,14 +501,21 @@ void Renderer::renderDeck(Deck* deck, int yOffset, int height, int samplesPerPix
         SDL_SetRenderDrawColor(renderer, statusColor.r, statusColor.g, statusColor.b, statusColor.a);
         SDL_RenderFillRect(renderer, &statusRect);
         
-        drawText(30, yOffset + 5, name, {255, 255, 255, 255});
+        int textY = yOffset + 5;
+        drawText(30, textY, name, {255, 255, 255, 255});
+        textY += 28;
+
+        std::string filepath = deck->getCurrentFilepath();
+        std::string filename = filepath.substr(filepath.find_last_of("/\\") + 1);
+        drawText(30, textY, filename, {200, 200, 200, 255}, 12);
+        textY += 18;
 
         if (buffer.sampleRate > 0) {
             int currentSeconds = (int)(currentFrame / buffer.sampleRate);
             int totalSeconds = (int)(framesAvailable / buffer.sampleRate);
-            drawTime(30, yOffset + 35, currentSeconds);
-            drawText(90, yOffset + 35, "/", {200, 200, 200, 255});
-            drawTime(105, yOffset + 35, totalSeconds);
+            drawTime(30, textY, currentSeconds);
+            drawText(90, textY, "/", {200, 200, 200, 255});
+            drawTime(105, textY, totalSeconds);
         }
 
         float ratio = (float)(speed - 1.0) * 100.0f;
@@ -516,25 +523,67 @@ void Renderer::renderDeck(Deck* deck, int yOffset, int height, int samplesPerPix
         float effectiveBPM = deck->getEffectiveBPM();
         float offset = deck->getBeatOffset();
 
-        char rateBuf[256];
+        int infoY = yOffset + 10;
+        char buf[128];
+        
+        snprintf(buf, sizeof(buf), "Stretch: %.2fx", stretchFactor);
+        drawText(halfWidth + 20, infoY, buf, {0, 255, 255, 255}, 12);
+        infoY += 15;
+
         if (originalBPM > 0.0f) {
-             snprintf(rateBuf, sizeof(rateBuf), "Stretch: %.2fx | Original BPM: %.1f | Effective BPM: %.1f | Offset: %.3f | Rate: %+.1f%%", stretchFactor, originalBPM, effectiveBPM, offset, ratio);
-        } else {
-             snprintf(rateBuf, sizeof(rateBuf), "Stretch: %.2fx | Rate: %+.1f%%", stretchFactor, ratio);
+            snprintf(buf, sizeof(buf), "BPM: %.1f (Original)", originalBPM);
+            drawText(halfWidth + 20, infoY, buf, {0, 255, 255, 255}, 12);
+            infoY += 15;
+            
+            snprintf(buf, sizeof(buf), "Effective: %.1f", effectiveBPM);
+            drawText(halfWidth + 20, infoY, buf, {0, 255, 255, 255}, 12);
+            infoY += 15;
+
+            snprintf(buf, sizeof(buf), "Offset: %.3f", offset);
+            drawText(halfWidth + 20, infoY, buf, {0, 255, 255, 255}, 12);
+            infoY += 15;
         }
-        drawText(halfWidth + 20, yOffset + 35, rateBuf, {0, 255, 255, 255});
+
+        snprintf(buf, sizeof(buf), "Rate: %+.1f%%", ratio);
+        drawText(halfWidth + 20, infoY, buf, {0, 255, 255, 255}, 12);
+
+        if (deck->isLoopActive()) {
+            drawText(halfWidth + 20, infoY + 15, "LOOP ACTIVE", {255, 165, 0, 255}, 12);
+        }
 
         if (deck->isAnalyzing()) {
-            drawText(halfWidth + 20, yOffset + 60, "Analyzing BPM...", {100, 100, 100, 255});
+            drawText(halfWidth + 20, infoY + 30, "Analyzing BPM...", {100, 100, 100, 255}, 12);
         }
 
         if (deck->isMetronomeEnabled()) {
-            drawText(halfWidth + 20, yOffset + 85, "METRONOME", {0, 255, 0, 255});
+            drawText(width - 120, yOffset + 10, "METRONOME", {0, 255, 0, 255}, 12);
         }
 
         if (deck->isLoading()) {
-            drawText(width - 250, yOffset + 10, "Loading...", {255, 255, 0, 255});
+            drawText(width - 250, yOffset + 10, "Loading...", {255, 255, 0, 255}, 12);
         }
     }
     passes[6].lastTimeMs = std::chrono::duration<double, std::milli>(std::chrono::high_resolution_clock::now() - pass7Start).count();
+
+    // Draw Loop Region (New visual pass)
+    if (deck->isLoopActive()) {
+        uint64_t lStart = deck->getLoopStart();
+        uint64_t lEnd = deck->getLoopEnd();
+        
+        int xStart = halfWidth + (int)(((double)lStart - currentFrame) / effectiveSPP);
+        int xEnd = halfWidth + (int)(((double)lEnd - currentFrame) / effectiveSPP);
+        
+        if (xEnd > 0 && xStart < width) {
+            SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+            SDL_SetRenderDrawColor(renderer, 255, 165, 0, 60); // Orange transparent
+            SDL_Rect loopRect = { xStart, yOffset, xEnd - xStart, height };
+            SDL_RenderFillRect(renderer, &loopRect);
+            
+            // Draw boundaries
+            SDL_SetRenderDrawColor(renderer, 255, 165, 0, 180);
+            SDL_RenderDrawLine(renderer, xStart, yOffset, xStart, yOffset + height);
+            SDL_RenderDrawLine(renderer, xEnd, yOffset, xEnd, yOffset + height);
+            SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+        }
+    }
 }

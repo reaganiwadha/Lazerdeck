@@ -12,29 +12,26 @@ public:
     Engine();
     ~Engine();
 
-    bool init();
+    bool init(int numDecks = 2);
     void run();
 
 private:
     void handleEvents();
-    void update();
-    void render();
-    
-    void handleDeckInput(Deck* deck, SDL_Event& event, bool shift);
     void handleGlobalInput(SDL_Event& event, bool shift);
+    void handleDeckInput(Deck* activeDeck, SDL_Event& event, bool shift);
+    void render();
 
+    bool running;
     Renderer renderer;
     AudioEngine audioEngine;
     AnalysisDB analysisDB;
     
-    std::unique_ptr<Deck> deckA;
-    std::unique_ptr<Deck> deckB;
-    
-    bool running;
+    std::vector<std::unique_ptr<Deck>> decks;
+    int activeDeckIndex;
+
     int samplesPerPixel;
-    int activeDeckIndex; // 0 for A, 1 for B
     int sampleRate;
-    
+
     uint64_t lastTime;
     uint64_t frameCount;
     uint64_t fpsTimer;

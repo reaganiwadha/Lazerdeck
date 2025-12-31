@@ -8,7 +8,7 @@ Engine::~Engine() {
     audioEngine.stop();
 }
 
-bool Engine::init() {
+bool Engine::init(int numDecks) {
     if (!renderer.init()) {
         Logger::error("Renderer initialization failed");
         return false;
@@ -17,25 +17,28 @@ bool Engine::init() {
     // Load resources (non-blocking now)
     Logger::info("Loading resources...");
     
-    deckA = std::make_unique<Deck>(sampleRate);
-    deckB = std::make_unique<Deck>(sampleRate);
+    std::vector<Deck*> deckPtrs;
+    for (int i = 0; i < numDecks; ++i) {
+        decks.push_back(std::make_unique<Deck>(sampleRate));
+        deckPtrs.push_back(decks.back().get());
+    }
 
-    if (!audioEngine.init(deckA.get(), deckB.get(), sampleRate, 128)) { // 128 frames buffer (~2.9ms) - stable low latency
+    if (!audioEngine.init(deckPtrs, sampleRate, 128)) { // 128 frames buffer (~2.9ms) - stable low latency
         Logger::error("AudioEngine initialization failed");
         return false;
     }
 
     sampleRate = audioEngine.getActualSampleRate();
 
-    deckA->load("resources/znfodastica.wav", &analysisDB);
-    deckB->load("resources/glory.mp3", &analysisDB);
+    if (numDecks > 0) decks[0]->load("resources/znfodastica.wav", &analysisDB);
+    if (numDecks > 1) decks[1]->load("resources/glory.mp3", &analysisDB);
 
     if (!audioEngine.start()) {
         Logger::error("Failed to start AudioEngine");
         return false;
     }
 
-    Logger::info("Lazerdeck Mixer Ready!");
+    Logger::info("Lazerdeck Mixer Ready with " + std::to_string(numDecks) + " decks!");
     Logger::info("Controls:");
     Logger::info("  Active Deck:     Space (Play/Pause), Left/Right (Seek), M (Metronome), S (Save Analysis)");
     Logger::info("                   -/+ (Speed Control)");
@@ -119,8 +122,9 @@ void Engine::handleEvents() {
                 renderer.togglePass(passIndex);
             }
             
-            Deck* activeDeck = (activeDeckIndex == 0) ? deckA.get() : deckB.get();
-            handleDeckInput(activeDeck, event, shift);
+            if (activeDeckIndex >= 0 && activeDeckIndex < (int)decks.size()) {
+                handleDeckInput(decks[activeDeckIndex].get(), event, shift);
+            }
         }
 
         if (event.type == SDL_MOUSEWHEEL) {
@@ -135,12 +139,14 @@ void Engine::handleGlobalInput(SDL_Event& event, bool shift) {
     // Deck Selection / BPM Adjust (Global-ish)
     if (event.key.keysym.sym == SDLK_UP) {
         if (!shift) {
-            activeDeckIndex = 0;
+            activeDeckIndex--;
+            if (activeDeckIndex < 0) activeDeckIndex = (int)decks.size() - 1;
         }
     }
     else if (event.key.keysym.sym == SDLK_DOWN) {
         if (!shift) {
-            activeDeckIndex = 1;
+            activeDeckIndex++;
+            if (activeDeckIndex >= (int)decks.size()) activeDeckIndex = 0;
         }
     }
     // Open File
@@ -195,20 +201,29 @@ void Engine::handleDeckInput(Deck* activeDeck, SDL_Event& event, bool shift) {
             activeDeck->seek((int64_t)sampleRate * 5);
         }
     }
+    else if (event.key.keysym.sym == SDLK_LEFTBRACKET) {
+        activeDeck->setLoopStart();
+    }
+    else if (event.key.keysym.sym == SDLK_RIGHTBRACKET) {
+        activeDeck->setLoopEnd();
+    }
+    else if (event.key.keysym.sym == SDLK_BACKSLASH) {
+        activeDeck->exitLoop();
+    }
 }
 
 void Engine::render() {
     renderer.clear();
     
-    // Update visual frame positions for smooth animation
-    deckA->updateVisualFrame();
-    deckB->updateVisualFrame();
-    
-    // Render Top Deck (A)
-    renderer.renderDeck(deckA.get(), 0, renderer.getHeight() / 2, samplesPerPixel, "Deck A", activeDeckIndex == 0);
-    
-    // Render Bottom Deck (B)
-    renderer.renderDeck(deckB.get(), renderer.getHeight() / 2, renderer.getHeight() / 2, samplesPerPixel, "Deck B", activeDeckIndex == 1);
+    int numDecks = (int)decks.size();
+    if (numDecks > 0) {
+        int deckHeight = renderer.getHeight() / numDecks;
+        for (int i = 0; i < numDecks; ++i) {
+            decks[i]->updateVisualFrame();
+            std::string name = "Deck " + std::string(1, 'A' + i);
+            renderer.renderDeck(decks[i].get(), i * deckHeight, deckHeight, samplesPerPixel, name.c_str(), activeDeckIndex == i);
+        }
+    }
     
     renderer.present();
     renderer.frameUpdate();

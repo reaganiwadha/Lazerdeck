@@ -40,6 +40,7 @@ public:
     bool isPlaying() const;
     bool isLoading() const;
     uint64_t getFramesAvailable() const;
+    std::string getCurrentFilepath() const { return currentFilepath; }
 
     float getBPM() const { return bpm.load(); }
     void setBPM(float b) { bpm.store(b); }
@@ -72,9 +73,14 @@ public:
 
     
 
-        double getCurrentInputTime() const { return currentInputTime; }
+    double getCurrentInputTime() const { return currentInputTime; }
 
-    
+    void setLoopStart();
+    void setLoopEnd();
+    void exitLoop();
+    bool isLoopActive() const { return loopActive.load(); }
+    uint64_t getLoopStart() const { return loopStart.load(); }
+    uint64_t getLoopEnd() const { return loopEnd.load(); }
 
     private:
 
@@ -136,21 +142,59 @@ public:
 
     
 
-        // Time Stretching
+                // Time Stretching
 
-        RubberBand::RubberBandStretcher* stretcher = nullptr;
+    
 
-        std::mutex stretcherMutex;
+                RubberBand::RubberBandStretcher* stretcher = nullptr;
 
-        std::atomic<double> speed{1.0};
+    
 
-        double currentProcessSpeed = 1.0;
+                std::mutex stretcherMutex;
 
-        double currentInputTime = 0.0; // In seconds, original track time
+    
 
-        int sampleRate;
+                std::atomic<double> speed{1.0};
 
-        std::vector<float> scratchIn[2];
+    
+
+                double currentProcessSpeed = 1.0;
+
+    
+
+                double currentInputTime = 0.0; // In seconds, original track time
+
+    
+
+                int sampleRate;
+
+    
+
+        
+
+    
+
+                // Looping
+
+    
+
+                std::atomic<bool> loopActive{false};
+
+    
+
+                std::atomic<uint64_t> loopStart{0};
+
+    
+
+                std::atomic<uint64_t> loopEnd{0};
+
+    
+
+        
+
+    
+
+                std::vector<float> scratchIn[2];
 
         std::vector<float> scratchOut[2];
 

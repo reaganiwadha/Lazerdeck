@@ -8,8 +8,7 @@
 class AudioEngine;
 
 struct MixState {
-    Deck* deckA;
-    Deck* deckB;
+    std::vector<Deck*> decks;
     AudioEngine* engine;
 };
 
@@ -23,7 +22,7 @@ public:
     AudioEngine();
     ~AudioEngine();
 
-    bool init(Deck* deckA, Deck* deckB, int sampleRate = 44100, int bufferSize = 128);
+    bool init(const std::vector<Deck*>& decks, int sampleRate = 44100, int bufferSize = 128);
     bool start();
     void stop();
     
@@ -53,7 +52,6 @@ private:
     int actualSampleRate;
 
     std::vector<float> metronomeClick;
-    DeckMetronome metronomeA;
-    DeckMetronome metronomeB;
+    std::vector<DeckMetronome> metronomeStates;
     int sampleRate;
 };

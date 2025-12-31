@@ -4,8 +4,7 @@
 #include "Logger.hpp"
 
 AudioEngine::AudioEngine() : stream(nullptr), initialized(false), sampleRate(44100), framesPerBuffer(0), latencyMs(0), actualSampleRate(44100) {
-    mixState.deckA = nullptr;
-    mixState.deckB = nullptr;
+    mixState.engine = nullptr;
 }
 
 AudioEngine::~AudioEngine() {
@@ -15,12 +14,13 @@ AudioEngine::~AudioEngine() {
     }
 }
 
-bool AudioEngine::init(Deck* deckA, Deck* deckB, int sampleRate, int bufferSize) {
+bool AudioEngine::init(const std::vector<Deck*>& decks, int sampleRate, int bufferSize) {
     this->sampleRate = sampleRate;
-    mixState.deckA = deckA;
-    mixState.deckB = deckB;
+    mixState.decks = decks;
     mixState.engine = this;
     framesPerBuffer = bufferSize;
+
+    metronomeStates.assign(decks.size(), DeckMetronome{});
 
     // Generate metronome click
     metronomeClick.resize(sampleRate * 0.05); // 50ms
@@ -161,11 +161,8 @@ bool AudioEngine::init(Deck* deckA, Deck* deckB, int sampleRate, int bufferSize)
             }
 
             // Update decks to use actual sample rate
-            if (mixState.deckA) {
-                mixState.deckA->updateSampleRate(actualSampleRate);
-            }
-            if (mixState.deckB) {
-                mixState.deckB->updateSampleRate(actualSampleRate);
+            for (auto* deck : mixState.decks) {
+                if (deck) deck->updateSampleRate(actualSampleRate);
             }
         }
     }
@@ -213,14 +210,11 @@ int AudioEngine::audioCallback(
     // Clear output buffer first (silence)
     std::fill(out, out + framesPerBuffer * 2, 0.0f);
     
-    // Mix Deck A
-    if (mix->deckA) {
-        mix->deckA->process(out, framesPerBuffer);
-    }
-    
-    // Mix Deck B
-    if (mix->deckB) {
-        mix->deckB->process(out, framesPerBuffer);
+    // Mix Decks
+    for (auto* deck : mix->decks) {
+        if (deck) {
+            deck->process(out, framesPerBuffer);
+        }
     }
     
     // Mix Metronomes (separate path)
@@ -238,11 +232,10 @@ int AudioEngine::audioCallback(
 }
 
 void AudioEngine::renderMetronome(float* outputBuffer, unsigned long framesPerBuffer) {
-    if (mixState.deckA) {
-        processDeckMetronome(mixState.deckA, metronomeA, outputBuffer, framesPerBuffer);
-    }
-    if (mixState.deckB) {
-        processDeckMetronome(mixState.deckB, metronomeB, outputBuffer, framesPerBuffer);
+    for (size_t i = 0; i < mixState.decks.size(); ++i) {
+        if (mixState.decks[i]) {
+            processDeckMetronome(mixState.decks[i], metronomeStates[i], outputBuffer, framesPerBuffer);
+        }
     }
 }
 
