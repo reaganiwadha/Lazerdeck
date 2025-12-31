@@ -49,6 +49,20 @@ FetchContent_Declare(
     GIT_TAG v3.3.0
 )
 
+# oscpack
+FetchContent_Declare(
+    oscpack
+    GIT_REPOSITORY https://github.com/RossBencina/oscpack.git
+    GIT_TAG master
+)
+
+# VST3 SDK
+FetchContent_Declare(
+    vst3sdk
+    GIT_REPOSITORY https://github.com/steinbergmedia/vst3sdk.git
+    GIT_TAG v3.7.11_build_10
+)
+
 # SoundTouch ONLY on non-Windows
 if (NOT WIN32)
     FetchContent_Declare(
@@ -60,9 +74,21 @@ endif()
 
 FetchContent_MakeAvailable(rubberband)
 
+# Work around old CMake in dependencies
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+
+FetchContent_GetProperties(oscpack)
+if(NOT oscpack_POPULATED)
+    FetchContent_Populate(oscpack)
+endif()
+
+FetchContent_GetProperties(vst3sdk)
+if(NOT vst3sdk_POPULATED)
+    FetchContent_Populate(vst3sdk)
+endif()
+
 if (NOT WIN32)
     # Work around SoundTouch old CMake on Linux
-    set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
     FetchContent_MakeAvailable(soundtouch)
 endif()
 
@@ -84,12 +110,57 @@ endif()
 # --------------------------------------------------
 # Sources
 # --------------------------------------------------
+set(OSCPACK_SRCS
+    "${oscpack_SOURCE_DIR}/osc/OscTypes.cpp"
+    "${oscpack_SOURCE_DIR}/osc/OscReceivedElements.cpp"
+    "${oscpack_SOURCE_DIR}/osc/OscPrintReceivedElements.cpp"
+    "${oscpack_SOURCE_DIR}/osc/OscOutboundPacketStream.cpp"
+    "${oscpack_SOURCE_DIR}/ip/IpEndpointName.cpp"
+)
+
+if (WIN32)
+    list(APPEND OSCPACK_SRCS
+        "${oscpack_SOURCE_DIR}/ip/win32/NetworkingUtils.cpp"
+        "${oscpack_SOURCE_DIR}/ip/win32/UdpSocket.cpp"
+    )
+else()
+    list(APPEND OSCPACK_SRCS
+        "${oscpack_SOURCE_DIR}/ip/posix/NetworkingUtils.cpp"
+        "${oscpack_SOURCE_DIR}/ip/posix/UdpSocket.cpp"
+    )
+endif()
+
 set(SRCS
     src/main.cpp
     src/Deck.cpp
     src/Renderer.cpp
     src/Engine.cpp
     src/AudioEngine.cpp
+    src/OSCHandler.cpp
+    src/Engine_OSC.cpp
+    src/VST3Host.cpp
+    ${OSCPACK_SRCS}
+    "${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/module.cpp"
+    "${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/module_win32.cpp"
+    "${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/hostclasses.cpp"
+    "${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/parameterchanges.cpp"
+    "${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/pluginterfacesupport.cpp"
+    "${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/utility/stringconvert.cpp"
+    "${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/vstinitiids.cpp"
+    "${vst3sdk_SOURCE_DIR}/public.sdk/source/common/commoniids.cpp"
+    "${vst3sdk_SOURCE_DIR}/pluginterfaces/base/funknown.cpp"
+    "${vst3sdk_SOURCE_DIR}/pluginterfaces/base/ustring.cpp"
+    "${vst3sdk_SOURCE_DIR}/pluginterfaces/base/conststringtable.cpp"
+    "${vst3sdk_SOURCE_DIR}/pluginterfaces/base/coreiids.cpp"
+    "${vst3sdk_SOURCE_DIR}/base/source/fstring.cpp"
+    "${vst3sdk_SOURCE_DIR}/base/source/fobject.cpp"
+    "${vst3sdk_SOURCE_DIR}/base/source/fdebug.cpp"
+    "${vst3sdk_SOURCE_DIR}/base/source/baseiids.cpp"
+    "${vst3sdk_SOURCE_DIR}/base/source/updatehandler.cpp"
+    "${vst3sdk_SOURCE_DIR}/base/source/fstreamer.cpp"
+    "${vst3sdk_SOURCE_DIR}/base/source/fbuffer.cpp"
+    "${vst3sdk_SOURCE_DIR}/base/thread/source/fcondition.cpp"
+    "${vst3sdk_SOURCE_DIR}/base/thread/source/flock.cpp"
 )
 
 if (WIN32 AND NOT MSVC)
@@ -110,6 +181,9 @@ add_executable(lazerdeck ${SRCS})
 target_include_directories(lazerdeck PRIVATE
     src
     include
+    "${oscpack_SOURCE_DIR}"
+    "${vst3sdk_SOURCE_DIR}"
+    "${vst3sdk_SOURCE_DIR}/public.sdk/.."
 )
 
 # --------------------------------------------------
@@ -122,6 +196,7 @@ if (WIN32)
         SOUNDTOUCH_ALLOW_SSE=1
         SOUNDTOUCH_USE_NEON=0
         __SSE__=0
+        _CRT_SECURE_NO_WARNINGS
     )
 endif()
 
@@ -142,6 +217,8 @@ if (WIN32)
         ole32
         comctl32
         uuid
+        ws2_32
+        iphlpapi
     )
 endif()
 

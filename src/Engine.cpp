@@ -1,10 +1,12 @@
 #include "Engine.hpp"
 #include <iostream>
 #include "Logger.hpp"
+#include "OSCHandler.hpp"
 
 Engine::Engine() : running(false), samplesPerPixel(50), activeDeckIndex(0), sampleRate(44100) {}
 
 Engine::~Engine() {
+    if (oscHandler) oscHandler->stop();
     audioEngine.stop();
 }
 
@@ -37,6 +39,9 @@ bool Engine::init(int numDecks) {
         Logger::error("Failed to start AudioEngine");
         return false;
     }
+
+    oscHandler = std::make_unique<OSCHandler>(this, 9000);
+    oscHandler->start();
 
     Logger::info("Lazerdeck Mixer Ready with " + std::to_string(numDecks) + " decks!");
     Logger::info("Controls:");

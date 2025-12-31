@@ -6,6 +6,9 @@
 #include "AnalysisDB.hpp"
 #include <SDL2/SDL.h>
 #include <memory>
+#include <osc/OscReceivedElements.h>
+
+class OSCHandler;
 
 class Engine {
 public:
@@ -14,6 +17,8 @@ public:
 
     bool init(int numDecks = 2);
     void run();
+
+    void handleOSCCommand(int deckIdx, const std::string& cmd, const osc::ReceivedMessage& m);
 
 private:
     void handleEvents();
@@ -25,6 +30,7 @@ private:
     Renderer renderer;
     AudioEngine audioEngine;
     AnalysisDB analysisDB;
+    std::unique_ptr<OSCHandler> oscHandler;
     
     std::vector<std::unique_ptr<Deck>> decks;
     int activeDeckIndex;

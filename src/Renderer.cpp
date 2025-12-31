@@ -306,11 +306,11 @@ void Renderer::renderDeck(Deck* deck, int yOffset, int height, int samplesPerPix
 
     // Pass 1: Background
     auto pass1Start = std::chrono::high_resolution_clock::now();
-    if (passes[0].enabled) {
-        SDL_SetRenderDrawColor(renderer, 20, 20, 20, 255);
-        SDL_Rect bgRect = {2, yOffset + 2, width - 4, height - 4};
-        SDL_RenderFillRect(renderer, &bgRect);
-    }
+    // if (passes[0].enabled) {
+    //     SDL_SetRenderDrawColor(renderer, 20, 20, 20, 255);
+    //     SDL_Rect bgRect = {2, yOffset + 2, width - 4, height - 4};
+    //     SDL_RenderFillRect(renderer, &bgRect);
+    // }
     passes[0].lastTimeMs = std::chrono::duration<double, std::milli>(std::chrono::high_resolution_clock::now() - pass1Start).count();
 
     // If loading

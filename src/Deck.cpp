@@ -37,6 +37,12 @@ bool Deck::load(const std::string& filepath, AnalysisDB* db) {
     framesAvailable.store(0);
     loading.store(true);
 
+    // Clear old buffer data immediately
+    {
+        std::lock_guard<std::mutex> lock(bufferMutex);
+        buffer = AudioBuffer(2, sampleRate, 0, {}); 
+    }
+
     bpm.store(0.0f);
     beatOffset.store(0.0f);
     
@@ -254,6 +260,14 @@ void Deck::process(float* outputBuffer, unsigned long framesPerBuffer) {
              size_t toRetrieve = framesPerBuffer - framesRetrievedTotal;
              size_t got = stretcher->retrieve(outPtrs, toRetrieve);
              
+             // Apply VST effects
+             {
+                 std::lock_guard<std::mutex> lock(vstMutex);
+                 for (auto& vst : vstEffects) {
+                     vst->process(outPtrs, outPtrs, (int)got);
+                 }
+             }
+
              // Interleave to output
              for (size_t i = 0; i < got; ++i) {
                  outputBuffer[(framesRetrievedTotal + i) * 2 + 0] += outPtrs[0][i];
@@ -268,6 +282,15 @@ void Deck::process(float* outputBuffer, unsigned long framesPerBuffer) {
         // Retrieve what's available
         if (avail > 0) {
             size_t got = stretcher->retrieve(outPtrs, avail);
+
+            // Apply VST effects
+            {
+                std::lock_guard<std::mutex> lock(vstMutex);
+                for (auto& vst : vstEffects) {
+                    vst->process(outPtrs, outPtrs, (int)got);
+                }
+            }
+
             for (size_t i = 0; i < got; ++i) {
                 outputBuffer[(framesRetrievedTotal + i) * 2 + 0] += outPtrs[0][i];
                 outputBuffer[(framesRetrievedTotal + i) * 2 + 1] += outPtrs[1][i];
@@ -350,7 +373,9 @@ void Deck::process(float* outputBuffer, unsigned long framesPerBuffer) {
 }
 
 void Deck::play() {
-    playing.store(true);
+    if (framesAvailable.load() > 0 || loading.load()) {
+        playing.store(true);
+    }
 }
 
 void Deck::pause() {
@@ -358,8 +383,13 @@ void Deck::pause() {
 }
 
 void Deck::togglePlayback() {
-    bool p = playing.load();
-    playing.store(!p);
+    if (playing.load()) {
+        playing.store(false);
+    } else {
+        if (framesAvailable.load() > 0 || loading.load()) {
+            playing.store(true);
+        }
+    }
 }
 
 void Deck::seek(int64_t frameOffset) {
@@ -553,7 +583,38 @@ void Deck::setLoopEnd() {
     Logger::info("Loop Active: " + std::to_string(start) + " -> " + std::to_string(finalEnd));
 }
 
+void Deck::setLoopRange(uint64_t start, uint64_t end) {
+    if (end <= start) {
+        Logger::warn("Loop End must be after Loop Start");
+        return;
+    }
+    loopStart.store(start);
+    loopEnd.store(end);
+    loopActive.store(true);
+    Logger::info("Loop Active (Direct): " + std::to_string(start) + " -> " + std::to_string(end));
+}
+
 void Deck::exitLoop() {
     loopActive.store(false);
     Logger::info("Loop Exited");
+}
+
+void Deck::loadVST(const std::string& path) {
+    auto instance = Lazerdeck::VST3Host::getInstance().createInstance(path, sampleRate, 1024);
+    if (instance) {
+        std::lock_guard<std::mutex> lock(vstMutex);
+        vstEffects.push_back(std::move(instance));
+    }
+}
+
+void Deck::setVSTParameter(int vstIdx, int paramIdx, float value) {
+    std::lock_guard<std::mutex> lock(vstMutex);
+    if (vstIdx >= 0 && vstIdx < (int)vstEffects.size()) {
+        vstEffects[vstIdx]->setParameter(paramIdx, value);
+    }
+}
+
+void Deck::clearVSTs() {
+    std::lock_guard<std::mutex> lock(vstMutex);
+    vstEffects.clear();
 }

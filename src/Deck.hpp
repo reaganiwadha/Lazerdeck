@@ -12,6 +12,7 @@
 #include "soundtouch/BPMDetect.h"
 #include <rubberband/RubberBandStretcher.h>
 #include "AnalysisDB.hpp"
+#include "VST3Host.hpp"
 
 class Deck {
 public:
@@ -23,6 +24,11 @@ public:
     
     void process(float* outputBuffer, unsigned long framesPerBuffer);
     
+    // VST3
+    void loadVST(const std::string& path);
+    void setVSTParameter(int vstIdx, int paramIdx, float value);
+    void clearVSTs();
+
     // Playback control
     void play();
     void pause();
@@ -77,6 +83,7 @@ public:
 
     void setLoopStart();
     void setLoopEnd();
+    void setLoopRange(uint64_t start, uint64_t end);
     void exitLoop();
     bool isLoopActive() const { return loopActive.load(); }
     uint64_t getLoopStart() const { return loopStart.load(); }
@@ -196,8 +203,14 @@ public:
 
                 std::vector<float> scratchIn[2];
 
-        std::vector<float> scratchOut[2];
+                std::vector<float> scratchOut[2];
 
-    };
+        
+
+                std::vector<std::unique_ptr<Lazerdeck::VST3Instance>> vstEffects;
+
+                std::mutex vstMutex;
+
+            };
 
     

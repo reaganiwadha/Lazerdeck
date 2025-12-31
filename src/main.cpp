@@ -3,7 +3,7 @@
 int main(int argc, char *argv[]) {
     Engine engine;
     
-    int numDecks = 8;
+    int numDecks = 4;
     if (argc > 1) {
         try {
             numDecks = std::stoi(argv[1]);
