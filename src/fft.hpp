@@ -76,7 +76,7 @@ struct FFTEnergy {
         highBandEnd = (int)(20000.0f / freqPerBin);
         
         // Clamp
-        highBandEnd = std::min(highBandEnd, fftSize / 2);
+        highBandEnd = (std::min)(highBandEnd, fftSize / 2);
 
         energyCache.clear();
     }
@@ -146,7 +146,7 @@ struct FFTEnergy {
             bands.high /= (highBandEnd - midBandEnd);
             
             // Normalize energies (rough normalization)
-            float maxEnergy = std::max({bands.low, bands.mid, bands.high});
+            float maxEnergy = (std::max)({bands.low, bands.mid, bands.high});
             if (maxEnergy > 0.0f) {
                 bands.low /= maxEnergy;
                 bands.mid /= maxEnergy;
@@ -197,9 +197,9 @@ struct FFTEnergy {
         bands.high = powf(bands.high, gamma);
         
         float boost = 2.0f;
-        r = (uint8_t)std::min(255.0f, bands.low * 255.0f * boost);
-        g = (uint8_t)std::min(255.0f, bands.mid * 255.0f * boost);
-        b = (uint8_t)std::min(255.0f, bands.high * 255.0f * boost);
+        r = (uint8_t)(std::min)(255.0f, bands.low * 255.0f * boost);
+        g = (uint8_t)(std::min)(255.0f, bands.mid * 255.0f * boost);
+        b = (uint8_t)(std::min)(255.0f, bands.high * 255.0f * boost);
         
         if (r + g + b < 50) {
             r = g = b = 50;

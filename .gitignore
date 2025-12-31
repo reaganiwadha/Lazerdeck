@@ -25,3 +25,4 @@ analysis.db
 # Temporary files
 tmp/
 *.log
+CMakeFiles/**

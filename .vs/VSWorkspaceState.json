@@ -1,0 +1,15 @@
+{
+  "OutputFoldersPerTargetSystem": {
+    "Local Machine": [
+      "build",
+      "build-msvc"
+    ]
+  },
+  "ExpandedNodes": [
+    "",
+    "\\CMakeFiles",
+    "\\CMakeFiles\\4.2.1"
+  ],
+  "SelectedNode": "\\CMakeFiles\\4.2.1\\VCTargetsPath.vcxproj",
+  "PreviewInSolutionExplorer": false
+}

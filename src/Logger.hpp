@@ -8,9 +8,9 @@
 #include <sstream>
 
 enum class LogLevel {
-    INFO,
-    WARNING,
-    ERROR
+    LevelInfo,
+    LevelWarning,
+    LevelError
 };
 
 struct LogEntry {
@@ -31,9 +31,9 @@ public:
         
         // Console output
         switch (level) {
-            case LogLevel::INFO: std::cout << "[INFO] "; break;
-            case LogLevel::WARNING: std::cerr << "[WARN] "; break;
-            case LogLevel::ERROR: std::cerr << "[ERR] "; break;
+            case LogLevel::LevelInfo: std::cout << "[INFO] "; break;
+            case LogLevel::LevelWarning: std::cerr << "[WARN] "; break;
+            case LogLevel::LevelError: std::cerr << "[ERR] "; break;
         }
         std::cout << message << std::endl;
 
@@ -45,9 +45,9 @@ public:
     }
 
     // Helper methods for easy logging
-    static void info(const std::string& message) { getInstance().log(LogLevel::INFO, message); }
-    static void warn(const std::string& message) { getInstance().log(LogLevel::WARNING, message); }
-    static void error(const std::string& message) { getInstance().log(LogLevel::ERROR, message); }
+    static void info(const std::string& message) { getInstance().log(LogLevel::LevelInfo, message); }
+    static void warn(const std::string& message) { getInstance().log(LogLevel::LevelWarning, message); }
+    static void error(const std::string& message) { getInstance().log(LogLevel::LevelError, message); }
 
     std::vector<LogEntry> getEntries() const {
         std::lock_guard<std::mutex> lock(mutex);

@@ -1,5 +1,4 @@
 #include "Engine.hpp"
-#include "nfd.h"
 #include <iostream>
 #include "Logger.hpp"
 
@@ -118,21 +117,7 @@ void Engine::handleGlobalInput(SDL_Event& event, bool shift) {
     }
     // Open File
     else if (event.key.keysym.sym == SDLK_o) {
-        nfdchar_t *outPath = NULL;
-        nfdresult_t result = NFD_OpenDialog(NULL, NULL, &outPath);
-        
-        if (result == NFD_OKAY) {
-            Logger::info("Loading: " + std::string(outPath));
-            if (activeDeckIndex == 0) deckA->load(outPath);
-            else deckB->load(outPath);
-            free(outPath);
-        }
-        else if (result == NFD_CANCEL) {
-            Logger::info("Open cancelled");
-        }
-        else {
-            Logger::error("Error: " + std::string(NFD_GetError()));
-        }
+        Logger::info("Open File dialog is currently disabled.");
     }
 }
 

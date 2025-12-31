@@ -110,8 +110,8 @@ void Renderer::drawLogs() {
     // Draw in reverse order (newest at bottom)
     for (auto it = entries.rbegin(); it != entries.rend(); ++it) {
         SDL_Color color = {200, 200, 200, 255};
-        if (it->level == LogLevel::WARNING) color = {255, 200, 0, 255};
-        if (it->level == LogLevel::ERROR) color = {255, 50, 50, 255};
+        if (it->level == LogLevel::LevelWarning) color = {255, 200, 0, 255};
+        if (it->level == LogLevel::LevelError) color = {255, 50, 50, 255};
         
         drawText(x, y, it->message, color, 12);
         y -= 14;

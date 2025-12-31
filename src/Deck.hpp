@@ -9,7 +9,7 @@
 #include <mutex>
 #include "audio.hpp"
 #include "fft.hpp"
-#include "BPMDetect.h"
+#include "soundtouch/BPMDetect.h"
 #include <rubberband/RubberBandStretcher.h>
 #include "AnalysisDB.hpp"
 
