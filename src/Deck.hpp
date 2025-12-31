@@ -26,6 +26,8 @@ public:
     
     // VST3
     void loadVST(const std::string& path);
+    void usingVST(int index, const std::string& path);
+    void showVST(int index);
     void setVSTParameter(int vstIdx, int paramIdx, float value);
     void clearVSTs();
 

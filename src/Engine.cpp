@@ -3,14 +3,24 @@
 #include "Logger.hpp"
 #include "OSCHandler.hpp"
 
+#ifdef _WIN32
+#include <objbase.h>
+#endif
+
 Engine::Engine() : running(false), samplesPerPixel(50), activeDeckIndex(0), sampleRate(44100) {}
 
 Engine::~Engine() {
     if (oscHandler) oscHandler->stop();
     audioEngine.stop();
+#ifdef _WIN32
+    CoUninitialize();
+#endif
 }
 
 bool Engine::init(int numDecks) {
+#ifdef _WIN32
+    CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+#endif
     if (!renderer.init()) {
         Logger::error("Renderer initialization failed");
         return false;
@@ -79,6 +89,9 @@ void Engine::run() {
     while (running) {
         uint64_t frameStartPerf = SDL_GetPerformanceCounter();
 
+        // Process tasks queued from other threads (e.g., OSC)
+        processTasks();
+
         handleEvents();
         render();
 
@@ -107,6 +120,23 @@ void Engine::run() {
             double sleepTimeMs = targetFrameTimeMs - frameTimeMs;
             SDL_Delay((uint32_t)(sleepTimeMs));
         }
+    }
+}
+
+void Engine::queueTask(std::function<void()> task) {
+    std::lock_guard<std::mutex> lock(taskMutex);
+    taskQueue.push_back(task);
+}
+
+void Engine::processTasks() {
+    std::vector<std::function<void()>> currentTasks;
+    {
+        std::lock_guard<std::mutex> lock(taskMutex);
+        currentTasks.swap(taskQueue);
+    }
+    
+    for (const auto& task : currentTasks) {
+        if (task) task();
     }
 }
 
