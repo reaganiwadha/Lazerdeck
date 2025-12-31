@@ -30,8 +30,11 @@ public:
     void seek(int64_t frameOffset);
     void setFrame(uint64_t frame);
     
+    int getSampleRate() const { return sampleRate; }
+    
     // Getters
     uint64_t getCurrentFrame() const;
+    double getVisualFrame() const;
     const AudioBuffer& getBuffer() const;
     const FFTEnergy& getFFTEnergy() const;
     bool isPlaying() const;
@@ -54,11 +57,14 @@ public:
 
         // Speed Control
 
-        void setSpeed(double s);
+    void setSpeed(double s);
 
-        double getSpeed() const;
-
-        void increaseSpeed();
+    double getSpeed() const;
+    
+    void updateVisualFrame();
+    void updateSampleRate(int newSampleRate);
+    
+    void increaseSpeed();
 
         void decreaseSpeed();
 
@@ -81,6 +87,10 @@ public:
         AudioBuffer buffer;
 
         std::atomic<uint64_t> currentFrame;
+
+        std::atomic<double> visualFrame{0.0};
+        uint64_t lastVisualUpdateTime = 0;
+        double lastVisualFrame = 0.0;
 
         std::atomic<bool> playing;
 

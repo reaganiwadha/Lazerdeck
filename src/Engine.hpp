@@ -40,4 +40,5 @@ private:
     uint64_t fpsTimer;
     int currentFPS;
     int monitorRefreshRate;
+    uint64_t perfFrequency;
 };

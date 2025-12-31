@@ -3,7 +3,7 @@
 #include <cmath>
 #include "Logger.hpp"
 
-AudioEngine::AudioEngine() : stream(nullptr), initialized(false), sampleRate(44100) {
+AudioEngine::AudioEngine() : stream(nullptr), initialized(false), sampleRate(44100), framesPerBuffer(0), latencyMs(0), actualSampleRate(44100) {
     mixState.deckA = nullptr;
     mixState.deckB = nullptr;
 }
@@ -15,11 +15,12 @@ AudioEngine::~AudioEngine() {
     }
 }
 
-bool AudioEngine::init(Deck* deckA, Deck* deckB, int sampleRate) {
+bool AudioEngine::init(Deck* deckA, Deck* deckB, int sampleRate, int bufferSize) {
     this->sampleRate = sampleRate;
     mixState.deckA = deckA;
     mixState.deckB = deckB;
     mixState.engine = this;
+    framesPerBuffer = bufferSize;
 
     // Generate metronome click
     metronomeClick.resize(sampleRate * 0.05); // 50ms
@@ -37,20 +38,136 @@ bool AudioEngine::init(Deck* deckA, Deck* deckB, int sampleRate) {
     }
     initialized = true;
 
-    err = Pa_OpenDefaultStream(
+    // Configure for low latency
+    PaStreamParameters outputParams;
+    PaDeviceIndex deviceIndex = paNoDevice;
+    
+#ifdef _WIN32
+    // Try WASAPI first on Windows for lowest latency
+    PaHostApiIndex wasapiIndex = Pa_HostApiTypeIdToHostApiIndex(paWASAPI);
+    if (wasapiIndex >= 0) {
+        const PaHostApiInfo* hostInfo = Pa_GetHostApiInfo(wasapiIndex);
+        deviceIndex = hostInfo->defaultOutputDevice;
+        Logger::info("Using WASAPI for low latency");
+    }
+#endif
+
+    // Fallback to default device if WASAPI not available
+    if (deviceIndex == paNoDevice) {
+        deviceIndex = Pa_GetDefaultOutputDevice();
+        Logger::info("Using default audio API");
+    }
+
+    if (deviceIndex == paNoDevice) {
+        Logger::error("No default output device");
+        return false;
+    }
+
+    const PaDeviceInfo* deviceInfo = Pa_GetDeviceInfo(deviceIndex);
+    Logger::info("Audio device: " + std::string(deviceInfo->name));
+    Logger::info("Device default sample rate: " + std::to_string(deviceInfo->defaultSampleRate));
+    Logger::info("Suggested low latency: " + std::to_string(deviceInfo->defaultLowOutputLatency * 1000.0) + "ms");
+
+    outputParams.device = deviceIndex;
+    outputParams.channelCount = 2;
+    outputParams.sampleFormat = paFloat32;
+    outputParams.suggestedLatency = deviceInfo->defaultLowOutputLatency;
+    outputParams.hostApiSpecificStreamInfo = NULL;
+
+    // Try to open stream with requested sample rate
+    err = Pa_OpenStream(
         &stream,
-        0,                      // no input
-        2,                      // 2 output channels (Stereo)
-        paFloat32,              // 32-bit float
-        sampleRate,             // Dynamic sample rate
-        256,                    // frames per buffer
+        nullptr,
+        &outputParams,
+        sampleRate,
+        framesPerBuffer,
+        paClipOff,
         audioCallback,
         &mixState
     );
 
-    if (err != paNoError) {
+    // If sample rate not supported, try common rates
+    if (err == paInvalidSampleRate || err == paUnanticipatedHostError) {
+        Logger::info("Requested sample rate " + std::to_string(sampleRate) + " not supported");
+        
+        // Try common sample rates in order of preference for low latency
+        int fallbackRates[] = {48000, 44100, 96000, 192000, 88200};
+        bool opened = false;
+        
+        for (int rate : fallbackRates) {
+            if (rate == sampleRate) continue; // Already tried
+            
+            Logger::info("Trying sample rate: " + std::to_string(rate));
+            err = Pa_OpenStream(
+                &stream,
+                nullptr,
+                &outputParams,
+                rate,
+                framesPerBuffer,
+                paClipOff,
+                audioCallback,
+                &mixState
+            );
+            
+            if (err == paNoError) {
+                this->sampleRate = rate;
+                Logger::info("Successfully opened stream at " + std::to_string(rate) + " Hz");
+                
+                // Regenerate metronome click with new sample rate
+                metronomeClick.resize(this->sampleRate * 0.05);
+                for (size_t i = 0; i < metronomeClick.size(); ++i) {
+                    float t = (float)i / (float)this->sampleRate;
+                    float envelope = 1.0f - ((float)i / metronomeClick.size());
+                    metronomeClick[i] = (std::sin(2.0f * 3.14159f * 1000.0f * t) * 0.5f + 
+                                         std::sin(2.0f * 3.14159f * 2000.0f * t) * 0.25f) * envelope * 0.8f;
+                }
+                opened = true;
+                break;
+            }
+        }
+        
+        if (!opened) {
+            Logger::error("Could not find a supported sample rate");
+            Logger::error("Last PortAudio error: " + std::string(Pa_GetErrorText(err)));
+            return false;
+        }
+    } else if (err != paNoError) {
         Logger::error("PortAudio stream error: " + std::string(Pa_GetErrorText(err)));
         return false;
+    }
+
+    // Get actual latency and sample rate
+    const PaStreamInfo* streamInfo = Pa_GetStreamInfo(stream);
+    if (streamInfo) {
+        actualSampleRate = (int)streamInfo->sampleRate;
+        latencyMs = (int)(streamInfo->outputLatency * 1000.0);
+        Logger::info("Audio buffer size: " + std::to_string(framesPerBuffer) + " frames");
+        Logger::info("Actual audio latency: " + std::to_string(latencyMs) + "ms");
+        Logger::info("Requested sample rate: " + std::to_string(sampleRate) + " Hz");
+        Logger::info("Actual sample rate: " + std::to_string(actualSampleRate) + " Hz");
+        
+        if (actualSampleRate != sampleRate) {
+            Logger::warn("Sample rate mismatch! Device running at " + std::to_string(actualSampleRate) + " Hz instead of " + std::to_string(sampleRate) + " Hz");
+            
+            this->sampleRate = actualSampleRate;
+
+            // Regenerate metronome click with new sample rate
+            metronomeClick.resize(this->sampleRate * 0.05);
+            for (size_t i = 0; i < metronomeClick.size(); ++i) {
+                float t = (float)i / (float)this->sampleRate;
+                float envelope = 1.0f - ((float)i / metronomeClick.size());
+                metronomeClick[i] = (std::sin(2.0f * 3.14159f * 1000.0f * t) * 0.5f + 
+                                     std::sin(2.0f * 3.14159f * 2000.0f * t) * 0.25f) * envelope * 0.8f;
+            }
+
+            // Update decks to use actual sample rate
+            if (mixState.deckA) {
+                mixState.deckA->updateSampleRate(actualSampleRate);
+            }
+            if (mixState.deckB) {
+                mixState.deckB->updateSampleRate(actualSampleRate);
+            }
+        }
     }
 
     return true;
@@ -76,18 +193,20 @@ void AudioEngine::stop() {
     }
 }
 
+// int AudioEngine::getSampleRate() const {
+//     return sampleRate;
+// }
+
 int AudioEngine::audioCallback(
     const void *inputBuffer,
     void *outputBuffer,
     unsigned long framesPerBuffer,
     const PaStreamCallbackTimeInfo* timeInfo,
     PaStreamCallbackFlags statusFlags,
-    void *userData)
-{
+    void *userData) {
     MixState *mix = (MixState*)userData;
     float *out = (float*)outputBuffer;
     
-    (void) timeInfo;
     (void) statusFlags;
     (void) inputBuffer;
     
@@ -107,6 +226,12 @@ int AudioEngine::audioCallback(
     // Mix Metronomes (separate path)
     if (mix->engine) {
         mix->engine->renderMetronome(out, framesPerBuffer);
+    }
+    
+    // Calculate latency
+    if (timeInfo && mix->engine) {
+        int latency = (int)(timeInfo->outputBufferDacTime * 1000.0);
+        mix->engine->latencyMs = latency;
     }
     
     return paContinue;

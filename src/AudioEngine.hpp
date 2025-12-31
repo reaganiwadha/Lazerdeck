@@ -23,9 +23,14 @@ public:
     AudioEngine();
     ~AudioEngine();
 
-    bool init(Deck* deckA, Deck* deckB, int sampleRate = 44100);
+    bool init(Deck* deckA, Deck* deckB, int sampleRate = 44100, int bufferSize = 128);
     bool start();
     void stop();
+    
+    int getBufferSize() const { return framesPerBuffer; }
+    int getBitDepth() const { return 32; } // paFloat32 = 32-bit
+    int getLatencyMs() const { return latencyMs; }
+    int getActualSampleRate() const { return actualSampleRate; }
 
 private:
     static int audioCallback(
@@ -43,6 +48,9 @@ private:
     PaStream *stream;
     MixState mixState;
     bool initialized;
+    int framesPerBuffer;
+    int latencyMs;
+    int actualSampleRate;
 
     std::vector<float> metronomeClick;
     DeckMetronome metronomeA;

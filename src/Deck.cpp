@@ -2,9 +2,10 @@
 #include "miniaudio.h"
 #include "Deck.hpp"
 #include <cmath>
+#include <SDL2/SDL.h>
 #include "Logger.hpp"
 
-Deck::Deck(int sr) : currentFrame(0), playing(false), loading(false), framesAvailable(0), bpm(0.0f), beatOffset(0.0f), analyzing(false), metronomeEnabled(false), sampleRate(sr) {
+Deck::Deck(int sr) : currentFrame(0), visualFrame(0.0), playing(false), loading(false), framesAvailable(0), bpm(0.0f), beatOffset(0.0f), analyzing(false), metronomeEnabled(false), sampleRate(sr) {
     // Initialize RubberBand
     // Using OptionProcessRealTime for dynamic speed changes
     RubberBand::RubberBandStretcher::Options options = RubberBand::RubberBandStretcher::OptionProcessRealTime;
@@ -424,4 +425,58 @@ void Deck::decreaseSpeed() {
 
 float Deck::getEffectiveBPM() const {
     return bpm.load() * (float)speed.load();
+}
+
+double Deck::getVisualFrame() const {
+    return visualFrame.load();
+}
+
+void Deck::updateSampleRate(int newSampleRate) {
+    if (sampleRate == newSampleRate) return;
+
+    {
+        std::lock_guard<std::mutex> lock(bufferMutex);
+        sampleRate = newSampleRate;
+    }
+    
+    {
+        std::lock_guard<std::mutex> lock(stretcherMutex);
+        if (stretcher) delete stretcher;
+        RubberBand::RubberBandStretcher::Options options = RubberBand::RubberBandStretcher::OptionProcessRealTime;
+        stretcher = new RubberBand::RubberBandStretcher(sampleRate, 2, options);
+        stretcher->setMaxProcessSize(8192);
+        stretcher->setTimeRatio(1.0 / speed.load());
+    }
+
+    Logger::info("Deck sample rate updated to " + std::to_string(newSampleRate) + " Hz");
+}
+
+void Deck::updateVisualFrame() {
+    if (playing.load()) {
+        uint64_t now = SDL_GetTicks64();
+        if (lastVisualUpdateTime == 0) {
+            lastVisualUpdateTime = now;
+            lastVisualFrame = currentFrame.load();
+            visualFrame.store(lastVisualFrame);
+        } else {
+            double dt = (now - lastVisualUpdateTime) / 1000.0; // seconds
+            uint64_t current = currentFrame.load();
+            
+            // Interpolate between last known audio frame and current
+            double expectedAdvance = dt * sampleRate * speed.load();
+            double interpolated = lastVisualFrame + expectedAdvance;
+            
+            // Clamp to actual current frame (don't go past what audio has processed)
+            if (interpolated > current) {
+                interpolated = current;
+            }
+            
+            visualFrame.store(interpolated);
+            lastVisualUpdateTime = now;
+            lastVisualFrame = current;
+        }
+    } else {
+        lastVisualUpdateTime = 0;
+        visualFrame.store(currentFrame.load());
+    }
 }

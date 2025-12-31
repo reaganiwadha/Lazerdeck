@@ -20,13 +20,15 @@ bool Engine::init() {
     deckA = std::make_unique<Deck>(sampleRate);
     deckB = std::make_unique<Deck>(sampleRate);
 
-    deckA->load("resources/znfodastica.wav", &analysisDB);
-    deckB->load("resources/glory.mp3", &analysisDB);
-
-    if (!audioEngine.init(deckA.get(), deckB.get(), sampleRate)) {
+    if (!audioEngine.init(deckA.get(), deckB.get(), sampleRate, 128)) { // 128 frames buffer (~2.9ms) - stable low latency
         Logger::error("AudioEngine initialization failed");
         return false;
     }
+
+    sampleRate = audioEngine.getActualSampleRate();
+
+    deckA->load("resources/znfodastica.wav", &analysisDB);
+    deckB->load("resources/glory.mp3", &analysisDB);
 
     if (!audioEngine.start()) {
         Logger::error("Failed to start AudioEngine");
@@ -39,6 +41,7 @@ bool Engine::init() {
     Logger::info("                   -/+ (Speed Control)");
     Logger::info("  Global:          Up/Down (Select Deck), O (Open File)");
     Logger::info("                   Mouse Wheel (Zoom)");
+    Logger::info("  Debug:           1-9 (Toggle Render Passes)");
 
     running = true;
     
@@ -47,16 +50,26 @@ bool Engine::init() {
     fpsTimer = SDL_GetTicks64();
     currentFPS = 0;
     monitorRefreshRate = renderer.getRefreshRate();
+    perfFrequency = SDL_GetPerformanceFrequency();
     Logger::info("Monitor refresh rate: " + std::to_string(monitorRefreshRate) + "Hz");
+    
+    // Set initial title
+    std::string backend = renderer.getRendererBackend();
+    int actualRate = audioEngine.getActualSampleRate();
+    std::string title = "Lazerdeck - " + std::to_string(actualRate) + "Hz, 0 FPS | " + 
+                      std::to_string(audioEngine.getBufferSize()) + " frames buffer, " +
+                      std::to_string(audioEngine.getBitDepth()) + "-bit | " + backend;
+    renderer.setWindowTitle(title);
 
     return true;
 }
 
 void Engine::run() {
-    const double frameDelay = 1000.0 / monitorRefreshRate;
+    const double targetFrameTimeMs = 1000.0 / monitorRefreshRate;
+    const double targetFrameTimeNs = targetFrameTimeMs * 1000000.0;
 
     while (running) {
-        uint64_t frameStart = SDL_GetTicks64();
+        uint64_t frameStartPerf = SDL_GetPerformanceCounter();
 
         handleEvents();
         render();
@@ -68,14 +81,23 @@ void Engine::run() {
             frameCount = 0;
             fpsTimer = currentTime;
 
-            // Update title
-            std::string title = "Lazerdeck - " + std::to_string(sampleRate) + "Hz, " + std::to_string(currentFPS) + " FPS";
+            // Update title with full system info
+            std::string backend = renderer.getRendererBackend();
+            int actualRate = audioEngine.getActualSampleRate();
+            std::string title = "Lazerdeck - " + std::to_string(actualRate) + "Hz, " + std::to_string(currentFPS) + " FPS | " + 
+                              std::to_string(audioEngine.getBufferSize()) + " frames buffer, " +
+                              std::to_string(audioEngine.getBitDepth()) + "-bit | " + backend + 
+                              " | Latency: " + std::to_string(audioEngine.getLatencyMs()) + "ms";
             renderer.setWindowTitle(title);
         }
 
-        uint64_t frameTime = SDL_GetTicks64() - frameStart;
-        if (frameTime < frameDelay) {
-            SDL_Delay((uint32_t)(frameDelay - frameTime));
+        // High-precision timing for smooth animation
+        uint64_t frameEndPerf = SDL_GetPerformanceCounter();
+        double frameTimeMs = ((double)(frameEndPerf - frameStartPerf) / perfFrequency) * 1000.0;
+        
+        if (frameTimeMs < targetFrameTimeMs) {
+            double sleepTimeMs = targetFrameTimeMs - frameTimeMs;
+            SDL_Delay((uint32_t)(sleepTimeMs));
         }
     }
 }
@@ -90,6 +112,12 @@ void Engine::handleEvents() {
         if (event.type == SDL_KEYDOWN) {
             bool shift = event.key.keysym.mod & KMOD_SHIFT;
             handleGlobalInput(event, shift);
+            
+            // Handle render pass toggles (1-9)
+            if (event.key.keysym.sym >= SDLK_1 && event.key.keysym.sym <= SDLK_9) {
+                int passIndex = event.key.keysym.sym - SDLK_1;
+                renderer.togglePass(passIndex);
+            }
             
             Deck* activeDeck = (activeDeckIndex == 0) ? deckA.get() : deckB.get();
             handleDeckInput(activeDeck, event, shift);
@@ -172,6 +200,10 @@ void Engine::handleDeckInput(Deck* activeDeck, SDL_Event& event, bool shift) {
 void Engine::render() {
     renderer.clear();
     
+    // Update visual frame positions for smooth animation
+    deckA->updateVisualFrame();
+    deckB->updateVisualFrame();
+    
     // Render Top Deck (A)
     renderer.renderDeck(deckA.get(), 0, renderer.getHeight() / 2, samplesPerPixel, "Deck A", activeDeckIndex == 0);
     
@@ -179,4 +211,5 @@ void Engine::render() {
     renderer.renderDeck(deckB.get(), renderer.getHeight() / 2, renderer.getHeight() / 2, samplesPerPixel, "Deck B", activeDeckIndex == 1);
     
     renderer.present();
+    renderer.frameUpdate();
 }
