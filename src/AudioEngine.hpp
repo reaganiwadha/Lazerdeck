@@ -4,11 +4,13 @@
 #include <vector>
 #include <iostream>
 #include "Deck.hpp"
+#include "Mixer.hpp"
 
 class AudioEngine;
 
 struct MixState {
     std::vector<Deck*> decks;
+    Lazerdeck::Mixer* mixer = nullptr;
     AudioEngine* engine;
 };
 
@@ -22,7 +24,7 @@ public:
     AudioEngine();
     ~AudioEngine();
 
-    bool init(const std::vector<Deck*>& decks, int sampleRate = 44100, int bufferSize = 128);
+    bool init(const std::vector<Deck*>& decks, Lazerdeck::Mixer* mixer, int sampleRate = 44100, int bufferSize = 128);
     bool start();
     void stop();
     

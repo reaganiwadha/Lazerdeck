@@ -260,14 +260,6 @@ void Deck::process(float* outputBuffer, unsigned long framesPerBuffer) {
              size_t toRetrieve = framesPerBuffer - framesRetrievedTotal;
              size_t got = stretcher->retrieve(outPtrs, toRetrieve);
              
-             // Apply VST effects
-             {
-                 std::lock_guard<std::mutex> lock(vstMutex);
-                 for (auto& vst : vstEffects) {
-                     if (vst) vst->process(outPtrs, outPtrs, (int)got);
-                 }
-             }
-
              // Interleave to output
              for (size_t i = 0; i < got; ++i) {
                  outputBuffer[(framesRetrievedTotal + i) * 2 + 0] += outPtrs[0][i];
@@ -282,14 +274,6 @@ void Deck::process(float* outputBuffer, unsigned long framesPerBuffer) {
         // Retrieve what's available
         if (avail > 0) {
             size_t got = stretcher->retrieve(outPtrs, avail);
-
-            // Apply VST effects
-            {
-                std::lock_guard<std::mutex> lock(vstMutex);
-                for (auto& vst : vstEffects) {
-                    if (vst) vst->process(outPtrs, outPtrs, (int)got);
-                }
-            }
 
             for (size_t i = 0; i < got; ++i) {
                 outputBuffer[(framesRetrievedTotal + i) * 2 + 0] += outPtrs[0][i];
@@ -599,48 +583,3 @@ void Deck::exitLoop() {
     Logger::info("Loop Exited");
 }
 
-void Deck::loadVST(const std::string& path) {
-    auto instance = Lazerdeck::VST3Host::getInstance().createInstance(path, sampleRate, 1024);
-    if (instance) {
-        std::lock_guard<std::mutex> lock(vstMutex);
-        vstEffects.push_back(std::move(instance));
-    }
-}
-
-void Deck::usingVST(int index, const std::string& path) {
-    if (index < 0 || index > 32) return; // Reasonable limit
-
-    std::lock_guard<std::mutex> lock(vstMutex);
-    
-    if (index >= (int)vstEffects.size()) {
-        vstEffects.resize(index + 1);
-    }
-    
-    if (vstEffects[index] && vstEffects[index]->getPath() == path) {
-        return; // Already loaded
-    }
-    
-    auto instance = Lazerdeck::VST3Host::getInstance().createInstance(path, sampleRate, 1024);
-    if (instance) {
-        vstEffects[index] = std::move(instance);
-    }
-}
-
-void Deck::showVST(int index) {
-    std::lock_guard<std::mutex> lock(vstMutex);
-    if (index >= 0 && index < (int)vstEffects.size() && vstEffects[index]) {
-        vstEffects[index]->showEditor();
-    }
-}
-
-void Deck::setVSTParameter(int vstIdx, int paramIdx, float value) {
-    std::lock_guard<std::mutex> lock(vstMutex);
-    if (vstIdx >= 0 && vstIdx < (int)vstEffects.size() && vstEffects[vstIdx]) {
-        vstEffects[vstIdx]->setParameter(paramIdx, value);
-    }
-}
-
-void Deck::clearVSTs() {
-    std::lock_guard<std::mutex> lock(vstMutex);
-    vstEffects.clear();
-}

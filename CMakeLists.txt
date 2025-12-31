@@ -139,11 +139,13 @@ set(SRCS
     src/OSCHandler.cpp
     src/Engine_OSC.cpp
     src/VST3Host.cpp
+    src/Mixer.cpp
     ${OSCPACK_SRCS}
     "${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/module.cpp"
     "${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/module_win32.cpp"
     "${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/hostclasses.cpp"
     "${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/parameterchanges.cpp"
+    "${vst3sdk_SOURCE_DIR}/public.sdk/source/common/memorystream.cpp"
     "${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/pluginterfacesupport.cpp"
     "${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/utility/stringconvert.cpp"
     "${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/vstinitiids.cpp"

@@ -51,42 +51,47 @@ void Engine::handleOSCCommand(int deckIdx, const std::string& cmd, const osc::Re
         } else if (cmd == "offset") {
             deck->setBeatOffset(getFloat(it));
         } else if (cmd.find("vst/") == 0) {
-            // Handle vst/<index>/...
-            size_t nextSlash = cmd.find('/', 4);
-            if (nextSlash != std::string::npos) {
-                int vstIdx = std::stoi(cmd.substr(4, nextSlash - 4));
-                std::string subCmd = cmd.substr(nextSlash + 1);
-                
-                if (subCmd == "show") {
-                    this->queueTask([deck, vstIdx]() {
-                        deck->showVST(vstIdx);
-                    });
-                } else if (subCmd == "using") {
+            auto* channel = mixer ? mixer->getChannel(deckIdx) : nullptr;
+            if (channel) {
+                // Handle vst/<index>/...
+                size_t nextSlash = cmd.find('/', 4);
+                if (nextSlash != std::string::npos) {
+                    int vstIdx = std::stoi(cmd.substr(4, nextSlash - 4));
+                    std::string subCmd = cmd.substr(nextSlash + 1);
+                    
+                    if (subCmd == "show") {
+                        this->queueTask([channel, vstIdx]() {
+                            channel->showVST(vstIdx);
+                        });
+                    } else if (subCmd == "using") {
+                        if (it->IsString()) {
+                            std::string path = (it++)->AsString();
+                            this->queueTask([channel, vstIdx, path]() {
+                                channel->usingVST(vstIdx, path);
+                            });
+                        }
+                    } else if (subCmd == "param") {
+                        int paramIdx = (int)getFloat(it);
+                        float value = getFloat(it);
+                        channel->setVSTParameter(vstIdx, paramIdx, value);
+                    }
+                } else if (cmd == "vst/load") {
                     if (it->IsString()) {
                         std::string path = (it++)->AsString();
-                        this->queueTask([deck, vstIdx, path]() {
-                            deck->usingVST(vstIdx, path);
+                        this->queueTask([channel, path]() {
+                            channel->loadVST(path);
                         });
                     }
-                } else if (subCmd == "param") {
+                } else if (cmd == "vst/param") {
+                    int vstIdx = (int)getFloat(it);
                     int paramIdx = (int)getFloat(it);
                     float value = getFloat(it);
-                    deck->setVSTParameter(vstIdx, paramIdx, value);
+                    channel->setVSTParameter(vstIdx, paramIdx, value);
+                } else if (cmd == "vst/clear") {
+                    channel->clearVSTs();
                 }
-            } else if (cmd == "vst/load") {
-                if (it->IsString()) {
-                    std::string path = (it++)->AsString();
-                    this->queueTask([deck, path]() {
-                        deck->loadVST(path);
-                    });
-                }
-            } else if (cmd == "vst/param") {
-                int vstIdx = (int)getFloat(it);
-                int paramIdx = (int)getFloat(it);
-                float value = getFloat(it);
-                deck->setVSTParameter(vstIdx, paramIdx, value);
-            } else if (cmd == "vst/clear") {
-                deck->clearVSTs();
+            } else {
+                 Logger::warn("OSC: No mixer channel for deck " + std::to_string(deckIdx));
             }
         }
     } catch (const std::exception& e) {

@@ -25,6 +25,7 @@ public:
     
     bool isValid() const { return initialized; }
     std::string getPath() const { return loadedPath; }
+    void pushParameterChange(Steinberg::Vst::ParamID id, Steinberg::Vst::ParamValue value);
 
 private:
     bool initialized = false;
@@ -40,8 +41,13 @@ private:
     Steinberg::IPlugFrame* plugFrame = nullptr;  // Change to IPlugFrame*
     void* windowHandle = nullptr;
     
-    Steinberg::Vst::AudioBusBuffers inputBuffers;
-    
+    struct ParamChange {
+        Steinberg::Vst::ParamID id;
+        Steinberg::Vst::ParamValue value;
+    };
+    std::vector<ParamChange> paramChanges;
+    std::mutex paramMutex;
+
     void release();
 };
 

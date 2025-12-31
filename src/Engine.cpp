@@ -5,6 +5,7 @@
 
 #ifdef _WIN32
 #include <objbase.h>
+#include <windows.h>
 #endif
 
 Engine::Engine() : running(false), samplesPerPixel(50), activeDeckIndex(0), sampleRate(44100) {}
@@ -35,7 +36,9 @@ bool Engine::init(int numDecks) {
         deckPtrs.push_back(decks.back().get());
     }
 
-    if (!audioEngine.init(deckPtrs, sampleRate, 128)) { // 128 frames buffer (~2.9ms) - stable low latency
+    mixer = std::make_unique<Lazerdeck::Mixer>(numDecks, sampleRate);
+
+    if (!audioEngine.init(deckPtrs, mixer.get(), sampleRate, 128)) { // 128 frames buffer (~2.9ms) - stable low latency
         Logger::error("AudioEngine initialization failed");
         return false;
     }
@@ -141,6 +144,17 @@ void Engine::processTasks() {
 }
 
 void Engine::handleEvents() {
+#ifdef _WIN32
+    MSG msg;
+    while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+        if (msg.message == WM_QUIT) {
+            running = false;
+        }
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
+    }
+#endif
+
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
         if (event.type == SDL_QUIT) {

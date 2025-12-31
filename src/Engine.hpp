@@ -4,6 +4,7 @@
 #include "AudioEngine.hpp"
 #include "Deck.hpp"
 #include "AnalysisDB.hpp"
+#include "Mixer.hpp"
 #include "VST3Host.hpp"
 #include <SDL2/SDL.h>
 #include <memory>
@@ -36,6 +37,7 @@ private:
     Renderer renderer;
     AudioEngine audioEngine;
     AnalysisDB analysisDB;
+    std::unique_ptr<Lazerdeck::Mixer> mixer;
     std::unique_ptr<OSCHandler> oscHandler;
     
     std::vector<std::unique_ptr<Deck>> decks;

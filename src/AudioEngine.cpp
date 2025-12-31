@@ -14,9 +14,10 @@ AudioEngine::~AudioEngine() {
     }
 }
 
-bool AudioEngine::init(const std::vector<Deck*>& decks, int sampleRate, int bufferSize) {
+bool AudioEngine::init(const std::vector<Deck*>& decks, Lazerdeck::Mixer* mixer, int sampleRate, int bufferSize) {
     this->sampleRate = sampleRate;
     mixState.decks = decks;
+    mixState.mixer = mixer;
     mixState.engine = this;
     framesPerBuffer = bufferSize;
 
@@ -164,6 +165,9 @@ bool AudioEngine::init(const std::vector<Deck*>& decks, int sampleRate, int buff
             for (auto* deck : mixState.decks) {
                 if (deck) deck->updateSampleRate(actualSampleRate);
             }
+            if (mixState.mixer) {
+                mixState.mixer->setSampleRate(actualSampleRate);
+            }
         }
     }
 
@@ -210,11 +214,42 @@ int AudioEngine::audioCallback(
     // Clear output buffer first (silence)
     std::fill(out, out + framesPerBuffer * 2, 0.0f);
     
-    // Mix Decks
+    // Temp buffer for deck output (raw)
+    static std::vector<float> deckBuffer;
+    if (deckBuffer.size() < framesPerBuffer * 2) {
+        deckBuffer.resize(framesPerBuffer * 2);
+    }
+
+    // Process Decks and Mix
+    int deckIdx = 0;
     for (auto* deck : mix->decks) {
         if (deck) {
-            deck->process(out, framesPerBuffer);
+            // Clear deck buffer
+            std::fill(deckBuffer.begin(), deckBuffer.begin() + framesPerBuffer * 2, 0.0f);
+            
+            // Get raw audio from Deck (overwrite deckBuffer)
+            // Note: Deck::process adds to buffer, so we cleared it first.
+            deck->process(deckBuffer.data(), framesPerBuffer);
+
+            // Process via Mixer Channel
+            if (mix->mixer) {
+                auto* channel = mix->mixer->getChannel(deckIdx);
+                if (channel) {
+                    channel->process(deckBuffer.data(), out, framesPerBuffer);
+                } else {
+                    // Fallback: just add to output if no channel
+                    for (unsigned long i = 0; i < framesPerBuffer * 2; ++i) {
+                        out[i] += deckBuffer[i];
+                    }
+                }
+            } else {
+                // Fallback: just add to output if no mixer
+                for (unsigned long i = 0; i < framesPerBuffer * 2; ++i) {
+                    out[i] += deckBuffer[i];
+                }
+            }
         }
+        deckIdx++;
     }
     
     // Mix Metronomes (separate path)
