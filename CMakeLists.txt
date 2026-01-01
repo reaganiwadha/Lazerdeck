@@ -133,11 +133,13 @@ endif()
 set(SRCS
     src/main.cpp
     src/Deck.cpp
+    src/Deck_Define.cpp
     src/Renderer.cpp
     src/Engine.cpp
     src/AudioEngine.cpp
     src/OSCHandler.cpp
     src/Engine_OSC.cpp
+    src/Engine_Sync.cpp
     src/VST3Host.cpp
     src/Mixer.cpp
     ${OSCPACK_SRCS}

@@ -94,7 +94,7 @@ bool Renderer::init() {
         SDL_WINDOWPOS_CENTERED,
         width,
         height,
-        SDL_WINDOW_SHOWN
+        SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE
     );
 
     if (!window) return false;
@@ -122,6 +122,12 @@ bool Renderer::init() {
     preloadCommonText();
 
     return true;
+}
+
+void Renderer::updateSize() {
+    if (window) {
+        SDL_GetWindowSize(window, &width, &height);
+    }
 }
 
 void Renderer::clear() {
@@ -165,17 +171,37 @@ std::string Renderer::getRendererBackend() {
     return "Unknown";
 }
 
-void Renderer::drawText(int x, int y, const std::string& text, SDL_Color color, int fontSize) {
+void Renderer::drawText(int x, int y, const std::string& text, SDL_Color color, int fontSize, bool outline) {
     if (!cachesInitialized) return;
-    
+
     TextCache* cache = (fontSize == 12) ? &logCache : &textCache;
     SDL_Texture* texture = cache->get(text, color, fontSize);
     if (!texture) return;
-    
+
     int w, h;
     cache->getTextureSize(texture, &w, &h);
     SDL_Rect dest = {x, y, w, h};
-    
+
+    if (outline) {
+        SDL_Color black = {0, 0, 0, 255};
+        SDL_Texture* outlineTexture = cache->get(text, black, fontSize);
+
+        if (outlineTexture) {
+            SDL_Rect outlineDest = {x - 1, y - 1, w, h};
+            SDL_RenderCopy(renderer, outlineTexture, nullptr, &outlineDest);
+
+            outlineDest.y = y + 1;
+            SDL_RenderCopy(renderer, outlineTexture, nullptr, &outlineDest);
+
+            outlineDest.x = x - 1;
+            outlineDest.y = y;
+            SDL_RenderCopy(renderer, outlineTexture, nullptr, &outlineDest);
+
+            outlineDest.x = x + 1;
+            SDL_RenderCopy(renderer, outlineTexture, nullptr, &outlineDest);
+        }
+    }
+
     SDL_RenderCopy(renderer, texture, nullptr, &dest);
 }
 
@@ -223,8 +249,8 @@ void Renderer::drawLogs() {
         SDL_Color color = {200, 200, 200, 255};
         if (it->level == LogLevel::LevelWarning) color = {255, 200, 0, 255};
         if (it->level == LogLevel::LevelError) color = {255, 50, 50, 255};
-        
-        drawText(x, y, it->message, color, 12);
+
+        drawText(x, y, it->message, color, 12, false);
         y -= 14;
     }
 }
@@ -250,17 +276,17 @@ void Renderer::drawDebugHUD() {
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
 
     // Draw title and total
-    drawText(15, 15, "RENDER PASSES (1-9 toggle)", {0, 255, 255, 255}, 12);
+    drawText(15, 15, "RENDER PASSES (1-9 toggle)", {0, 255, 255, 255}, 12, false);
     char totalBuf[64];
     snprintf(totalBuf, sizeof(totalBuf), "Total Frame: %.3f ms", totalFrameTimeMs);
-    drawText(15, 30, totalBuf, {255, 255, 0, 255}, 12);
+    drawText(15, 30, totalBuf, {255, 255, 0, 255}, 12, false);
 
     int y = 50;
     for (int i = 0; i < 9; i++) {
         SDL_Color color = passes[i].enabled ? SDL_Color{0, 255, 0, 255} : SDL_Color{255, 100, 100, 255};
         char buf[64];
         snprintf(buf, sizeof(buf), "%s: %.3f ms", passes[i].name, passes[i].lastTimeMs);
-        drawText(15, y, buf, color, 12);
+        drawText(15, y, buf, color, 12, false);
         y += 14;
     }
     
@@ -272,10 +298,10 @@ void Renderer::drawTime(int x, int y, int seconds) {
     int s = seconds % 60;
     char buffer[16];
     snprintf(buffer, sizeof(buffer), "%02d:%02d", m, s);
-    drawText(x, y, buffer, {255, 255, 255, 255});
+    drawText(x, y, buffer, {255, 255, 255, 255}, 24, true);
 }
 
-void Renderer::renderDeck(Deck* deck, int yOffset, int height, int samplesPerPixel, const char* name, bool isActive) {
+void Renderer::renderDeck(Deck* deck, int yOffset, int height, int samplesPerPixel, const char* name, bool isActive, bool isMaster) {
     if (!deck) return;
 
     auto passStart = std::chrono::high_resolution_clock::now();
@@ -561,6 +587,15 @@ void Renderer::renderDeck(Deck* deck, int yOffset, int height, int samplesPerPix
 
         if (deck->isLoading()) {
             drawText(width - 250, yOffset + 10, "Loading...", {255, 255, 0, 255}, 12);
+        }
+
+        // Sync Indicators
+        if (deck->isSyncActive()) {
+            int src = deck->getSyncSource();
+            std::string syncText = "SYNC (Deck " + std::string(1, 'A' + src) + ")";
+            drawText(width - 120, yOffset + 25, syncText, {0, 255, 0, 255}, 12);
+        } else if (isMaster) {
+            drawText(width - 120, yOffset + 25, "MASTER", {255, 215, 0, 255}, 12); // Gold
         }
     }
     passes[6].lastTimeMs = std::chrono::duration<double, std::milli>(std::chrono::high_resolution_clock::now() - pass7Start).count();

@@ -76,6 +76,37 @@ void Deck::saveAnalysis(AnalysisDB& db) {
     }
 }
 
+void Deck::addTrigger(int id, float beat) {
+    std::lock_guard<std::mutex> lock(triggerMutex);
+    // Remove existing if same ID
+    triggers.erase(std::remove_if(triggers.begin(), triggers.end(), 
+        [id](const DeckTrigger& t) { return t.id == id; }), triggers.end());
+    
+    triggers.push_back({id, beat, false, {}});
+    Logger::info("Deck: Added trigger " + std::to_string(id) + " at beat " + std::to_string(beat));
+}
+
+void Deck::addTriggerAction(int id, const TriggerAction& action) {
+    std::lock_guard<std::mutex> lock(triggerMutex);
+    for (auto& t : triggers) {
+        if (t.id == id) {
+            t.actions.push_back(action);
+            return;
+        }
+    }
+}
+
+std::vector<DeckTrigger>& Deck::getTriggers() {
+    return triggers;
+}
+
+void Deck::resetTriggers() {
+    std::lock_guard<std::mutex> lock(triggerMutex);
+    for (auto& t : triggers) {
+        t.fired = false;
+    }
+}
+
 void Deck::analyzeBPMWork() {
     soundtouch::BPMDetect bpmDetector(2, sampleRate);
 

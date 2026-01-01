@@ -45,7 +45,7 @@ public:
     void clear();
     void present();
     
-    void renderDeck(Deck* deck, int yOffset, int height, int samplesPerPixel, const char* name, bool isActive);
+    void renderDeck(Deck* deck, int yOffset, int height, int samplesPerPixel, const char* name, bool isActive, bool isMaster);
     void drawLogs();
     void drawDebugHUD();
     
@@ -57,11 +57,12 @@ public:
 
     int getWidth() const { return width; }
     int getHeight() const { return height; }
+    void updateSize(); // Handle window resize
     void frameUpdate() { frameCounter++; textCache.cleanupOldTextures(); logCache.cleanupOldTextures(); }
     void preloadCommonText();
 
 private:
-    void drawText(int x, int y, const std::string& text, SDL_Color color, int fontSize = 24);
+    void drawText(int x, int y, const std::string& text, SDL_Color color, int fontSize = 24, bool outline = true);
     void drawTime(int x, int y, int seconds);
 
     SDL_Window* window = nullptr;

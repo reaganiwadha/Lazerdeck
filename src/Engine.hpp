@@ -24,6 +24,7 @@ public:
     void run();
 
     void handleOSCCommand(int deckIdx, const std::string& cmd, const osc::ReceivedMessage& m);
+    void handleSystemCommand(const std::string& cmd, const osc::ReceivedMessage& m);
     void queueTask(std::function<void()> task);
 
 private:
@@ -32,6 +33,10 @@ private:
     void handleDeckInput(Deck* activeDeck, SDL_Event& event, bool shift);
     void render();
     void processTasks();
+    void updateSync();
+    void checkTriggers();
+    void executeAction(const TriggerAction& action);
+    void scanVSTs();
 
     bool running;
     Renderer renderer;
@@ -55,4 +60,8 @@ private:
 
     std::vector<std::function<void()>> taskQueue;
     std::mutex taskMutex;
+
+    std::vector<std::string> vstPaths;
+    std::mutex vstMutex;
+    std::string workingDirectory;
 };

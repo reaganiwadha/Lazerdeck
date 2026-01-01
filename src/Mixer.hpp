@@ -21,6 +21,10 @@ public:
     void setVSTParameter(int vstIdx, int paramIdx, float value);
     void clearVSTs();
     
+    void beginDefinition();
+    void markVSTDefined(int index);
+    void endDefinition();
+
     void setSampleRate(int sr);
 
     // Volume/Pan (Future)
@@ -36,6 +40,10 @@ private:
     // Scratch buffers for VST processing
     std::vector<float> procBuffer[2]; // De-interleaved
     std::vector<float*> procPtrs;     // Pointers to procBuffer
+
+    // Definition
+    bool isDefining = false;
+    std::vector<int> definedVSTIndices;
 };
 
 class Mixer {

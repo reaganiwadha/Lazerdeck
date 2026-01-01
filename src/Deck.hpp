@@ -12,6 +12,7 @@
 #include "soundtouch/BPMDetect.h"
 #include <rubberband/RubberBandStretcher.h>
 #include "AnalysisDB.hpp"
+#include "Trigger.hpp"
 
 class Deck {
 public:
@@ -20,6 +21,12 @@ public:
 
     bool load(const std::string& filepath, AnalysisDB* db = nullptr);
     void saveAnalysis(AnalysisDB& db);
+
+    // Triggers
+    void addTrigger(int id, float beat);
+    void addTriggerAction(int id, const TriggerAction& action);
+    std::vector<DeckTrigger>& getTriggers();
+    void resetTriggers();
     
     void process(float* outputBuffer, unsigned long framesPerBuffer);
     
@@ -84,6 +91,20 @@ public:
     bool isLoopActive() const { return loopActive.load(); }
     uint64_t getLoopStart() const { return loopStart.load(); }
     uint64_t getLoopEnd() const { return loopEnd.load(); }
+
+    // Sync
+    void setSync(bool active, int sourceIdx = -1) { 
+        syncActive.store(active); 
+        syncSource.store(sourceIdx);
+    }
+    bool isSyncActive() const { return syncActive.load(); }
+    int getSyncSource() const { return syncSource.load(); }
+
+    // Declarative Definition
+    void beginDefinition();
+    void endDefinition();
+    void markVSTDefined(int index);
+    void markTriggerDefined(int id);
 
     private:
 
@@ -189,25 +210,46 @@ public:
 
     
 
-                std::atomic<uint64_t> loopEnd{0};
+                    std::atomic<uint64_t> loopEnd{0};
 
     
 
-        
+                
 
     
 
+                    // Sync
+
     
 
-                std::vector<float> scratchIn[2];
+                    std::atomic<bool> syncActive{false};
+
+    
+
+                    std::atomic<int> syncSource{-1};
+
+    
+
+                
+
+    
+
+                    std::vector<float> scratchIn[2];
 
 
 
                 std::vector<float> scratchOut[2];
 
+    // Triggers
+    std::vector<DeckTrigger> triggers;
+    std::mutex triggerMutex;
 
+    // Definition Tracking
+    bool isDefining = false;
+    std::vector<int> definedVSTIndices;
+    std::vector<int> definedTriggerIDs;
+    std::mutex definitionMutex;
 
-                // VSTs moved to MixerChannel
-
-            };
+    // VSTs moved to MixerChannel
+};
     

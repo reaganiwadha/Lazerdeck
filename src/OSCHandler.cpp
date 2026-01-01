@@ -48,15 +48,25 @@ void OSCHandler::ProcessMessage(const osc::ReceivedMessage& m, const IpEndpointN
     (void)remoteEndpoint;
     try {
         std::string address = m.AddressPattern();
-        
+
         // Expected format: /deck/<index>/<command>
         if (address.find("/deck/") == 0) {
             size_t secondSlash = address.find('/', 6);
             if (secondSlash != std::string::npos) {
                 int deckIdx = std::stoi(address.substr(6, secondSlash - 6));
                 std::string cmd = address.substr(secondSlash + 1);
-                
+
                 engine->handleOSCCommand(deckIdx, cmd, m);
+            }
+        }
+        else if (address.find("/system/") == 0) {
+            size_t secondSlash = address.find('/', 8);
+            if (secondSlash != std::string::npos) {
+                std::string cmd = address.substr(secondSlash + 1);
+                engine->handleSystemCommand(cmd, m);
+            } else {
+                std::string cmd = address.substr(8);
+                engine->handleSystemCommand(cmd, m);
             }
         }
     } catch (std::exception& e) {

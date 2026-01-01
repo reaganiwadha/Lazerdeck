@@ -102,6 +102,50 @@ void MixerChannel::clearVSTs() {
     vstEffects.clear();
 }
 
+void MixerChannel::beginDefinition() {
+    std::lock_guard<std::mutex> lock(vstMutex);
+    isDefining = true;
+    definedVSTIndices.clear();
+}
+
+void MixerChannel::markVSTDefined(int index) {
+    std::lock_guard<std::mutex> lock(vstMutex);
+    if (isDefining) {
+        definedVSTIndices.push_back(index);
+    }
+}
+
+void MixerChannel::endDefinition() {
+    std::lock_guard<std::mutex> lock(vstMutex);
+    if (!isDefining) return;
+    
+    // Remove any VSTs at indices NOT in definedVSTIndices
+    // Since vstEffects is a vector, "index" corresponds to position.
+    // If we define index 0 and 2, but not 1... vector logic gets weird.
+    // The Client sends VSTs in order: "VST at 0", "VST at 1".
+    // So "definedVSTIndices" will effectively be 0, 1, 2... N.
+    // We just need to trim the tail.
+    
+    int maxIndex = -1;
+    for (int idx : definedVSTIndices) {
+        if (idx > maxIndex) maxIndex = idx;
+    }
+    
+    // Resize to fit only the defined ones (plus 1 for size)
+    // Any VSTs beyond the last defined index are removed.
+    if ((int)vstEffects.size() > maxIndex + 1) {
+        vstEffects.resize(maxIndex + 1);
+    }
+    
+    // Also, if there are gaps (e.g. user sent 0 and 2, but not 1), 
+    // those slots might contain old VSTs or nulls. 
+    // But with the proposed "chain" API, the user builds the chain sequentially.
+    // So it will always be 0, 1, 2.
+    // So effectively, we just resize to the count of added VSTs.
+    
+    isDefining = false;
+}
+
 Mixer::Mixer(int numChannels, int sr) : sampleRate(sr) {
     for (int i = 0; i < numChannels; ++i) {
         channels.push_back(std::make_unique<MixerChannel>(sampleRate));
