@@ -9,7 +9,11 @@
 #include <mutex>
 #include "audio.hpp"
 #include "fft.hpp"
+#ifdef _WIN32
 #include "soundtouch/BPMDetect.h"
+#else
+#include "BPMDetect.h"
+#endif
 #include <rubberband/RubberBandStretcher.h>
 #include "AnalysisDB.hpp"
 #include "Trigger.hpp"

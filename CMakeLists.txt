@@ -14,6 +14,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Options
 # --------------------------------------------------
 option(USE_ZENITY "Use Zenity for NFD on Linux" ON)
+option(ENABLE_VST3 "Enable VST3 support" ON)
 
 # --------------------------------------------------
 # Dependencies
@@ -35,10 +36,12 @@ else()
     pkg_check_modules(PORTAUDIO REQUIRED portaudio-2.0)
     pkg_check_modules(FFTW3 REQUIRED fftw3)
     pkg_check_modules(FFTW3F REQUIRED fftw3f)
+
+    find_package(Threads REQUIRED)
 endif()
 
 # --------------------------------------------------
-# FetchContent (Linux-only SoundTouch + RubberBand)
+# FetchContent
 # --------------------------------------------------
 include(FetchContent)
 
@@ -57,11 +60,14 @@ FetchContent_Declare(
 )
 
 # VST3 SDK
-FetchContent_Declare(
-    vst3sdk
-    GIT_REPOSITORY https://github.com/steinbergmedia/vst3sdk.git
-    GIT_TAG v3.7.11_build_10
-)
+if (ENABLE_VST3)
+    FetchContent_Declare(
+        vst3sdk
+        GIT_REPOSITORY https://github.com/steinbergmedia/vst3sdk.git
+        GIT_TAG v3.7.11_build_10
+    )
+    add_compile_definitions(RELEASE=1)
+endif()
 
 # SoundTouch ONLY on non-Windows
 if (NOT WIN32)
@@ -82,9 +88,11 @@ if(NOT oscpack_POPULATED)
     FetchContent_Populate(oscpack)
 endif()
 
-FetchContent_GetProperties(vst3sdk)
-if(NOT vst3sdk_POPULATED)
-    FetchContent_Populate(vst3sdk)
+if (ENABLE_VST3)
+    FetchContent_GetProperties(vst3sdk)
+    if(NOT vst3sdk_POPULATED)
+        FetchContent_Populate(vst3sdk)
+    endif()
 endif()
 
 if (NOT WIN32)
@@ -140,32 +148,42 @@ set(SRCS
     src/OSCHandler.cpp
     src/Engine_OSC.cpp
     src/Engine_Sync.cpp
-    src/VST3Host.cpp
     src/Mixer.cpp
     ${OSCPACK_SRCS}
-    "${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/module.cpp"
-    "${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/module_win32.cpp"
-    "${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/hostclasses.cpp"
-    "${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/parameterchanges.cpp"
-    "${vst3sdk_SOURCE_DIR}/public.sdk/source/common/memorystream.cpp"
-    "${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/pluginterfacesupport.cpp"
-    "${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/utility/stringconvert.cpp"
-    "${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/vstinitiids.cpp"
-    "${vst3sdk_SOURCE_DIR}/public.sdk/source/common/commoniids.cpp"
-    "${vst3sdk_SOURCE_DIR}/pluginterfaces/base/funknown.cpp"
-    "${vst3sdk_SOURCE_DIR}/pluginterfaces/base/ustring.cpp"
-    "${vst3sdk_SOURCE_DIR}/pluginterfaces/base/conststringtable.cpp"
-    "${vst3sdk_SOURCE_DIR}/pluginterfaces/base/coreiids.cpp"
-    "${vst3sdk_SOURCE_DIR}/base/source/fstring.cpp"
-    "${vst3sdk_SOURCE_DIR}/base/source/fobject.cpp"
-    "${vst3sdk_SOURCE_DIR}/base/source/fdebug.cpp"
-    "${vst3sdk_SOURCE_DIR}/base/source/baseiids.cpp"
-    "${vst3sdk_SOURCE_DIR}/base/source/updatehandler.cpp"
-    "${vst3sdk_SOURCE_DIR}/base/source/fstreamer.cpp"
-    "${vst3sdk_SOURCE_DIR}/base/source/fbuffer.cpp"
-    "${vst3sdk_SOURCE_DIR}/base/thread/source/fcondition.cpp"
-    "${vst3sdk_SOURCE_DIR}/base/thread/source/flock.cpp"
 )
+
+if (ENABLE_VST3)
+    list(APPEND SRCS
+        src/VST3Host.cpp
+        "${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/module.cpp"
+        "${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/hostclasses.cpp"
+        "${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/parameterchanges.cpp"
+        "${vst3sdk_SOURCE_DIR}/public.sdk/source/common/memorystream.cpp"
+        "${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/pluginterfacesupport.cpp"
+        "${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/utility/stringconvert.cpp"
+        "${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/vstinitiids.cpp"
+        "${vst3sdk_SOURCE_DIR}/public.sdk/source/common/commoniids.cpp"
+        "${vst3sdk_SOURCE_DIR}/pluginterfaces/base/funknown.cpp"
+        "${vst3sdk_SOURCE_DIR}/pluginterfaces/base/ustring.cpp"
+        "${vst3sdk_SOURCE_DIR}/pluginterfaces/base/conststringtable.cpp"
+        "${vst3sdk_SOURCE_DIR}/pluginterfaces/base/coreiids.cpp"
+        "${vst3sdk_SOURCE_DIR}/base/source/fstring.cpp"
+        "${vst3sdk_SOURCE_DIR}/base/source/fobject.cpp"
+        "${vst3sdk_SOURCE_DIR}/base/source/fdebug.cpp"
+        "${vst3sdk_SOURCE_DIR}/base/source/baseiids.cpp"
+        "${vst3sdk_SOURCE_DIR}/base/source/updatehandler.cpp"
+        "${vst3sdk_SOURCE_DIR}/base/source/fstreamer.cpp"
+        "${vst3sdk_SOURCE_DIR}/base/source/fbuffer.cpp"
+        "${vst3sdk_SOURCE_DIR}/base/thread/source/fcondition.cpp"
+        "${vst3sdk_SOURCE_DIR}/base/thread/source/flock.cpp"
+    )
+
+    if (WIN32)
+        list(APPEND SRCS "${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/module_win32.cpp")
+    else()
+        list(APPEND SRCS "${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/module_linux.cpp")
+    endif()
+endif()
 
 if (WIN32 AND NOT MSVC)
     if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/nfd_win.cpp")
@@ -186,9 +204,15 @@ target_include_directories(lazerdeck PRIVATE
     src
     include
     "${oscpack_SOURCE_DIR}"
-    "${vst3sdk_SOURCE_DIR}"
-    "${vst3sdk_SOURCE_DIR}/public.sdk/.."
 )
+
+if (ENABLE_VST3)
+    target_include_directories(lazerdeck PRIVATE
+        "${vst3sdk_SOURCE_DIR}"
+        "${vst3sdk_SOURCE_DIR}/public.sdk/.."
+    )
+    target_compile_definitions(lazerdeck PRIVATE ENABLE_VST3)
+endif()
 
 # --------------------------------------------------
 # Compile definitions
@@ -223,6 +247,26 @@ if (WIN32)
         uuid
         ws2_32
         iphlpapi
+    )
+else()
+    target_link_libraries(lazerdeck PRIVATE
+        ${SDL2_LIBRARIES}
+        ${SDL2_TTF_LIBRARIES}
+        ${PORTAUDIO_LIBRARIES}
+        ${FFTW3_LIBRARIES}
+        ${FFTW3F_LIBRARIES}
+        SoundTouch
+        rubberband_lib
+        dl
+        m
+        Threads::Threads
+    )
+    target_include_directories(lazerdeck PRIVATE
+        ${SDL2_INCLUDE_DIRS}
+        ${SDL2_TTF_INCLUDE_DIRS}
+        ${PORTAUDIO_INCLUDE_DIRS}
+        ${FFTW3_INCLUDE_DIRS}
+        ${FFTW3F_INCLUDE_DIRS}
     )
 endif()
 

@@ -200,9 +200,14 @@ public:
     PlugFrame() = default;
     virtual ~PlugFrame() = default;
 
+#ifdef WIN32
     void setWindowHandle(HWND hwnd) { windowHandle = hwnd; }
+#else
+    void setWindowHandle(void* hwnd) { windowHandle = hwnd; }
+#endif
 
     Steinberg::tresult PLUGIN_API resizeView(Steinberg::IPlugView* view, Steinberg::ViewRect* newSize) override {
+#ifdef WIN32
         if (!view || !newSize || !windowHandle) return Steinberg::kInvalidArgument;
 
         int width = newSize->right - newSize->left;
@@ -215,6 +220,9 @@ public:
                      SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
 
         return Steinberg::kResultOk;
+#else
+        return Steinberg::kResultOk;
+#endif
     }
 
     Steinberg::tresult PLUGIN_API queryInterface(const Steinberg::TUID iid, void** obj) override {
@@ -228,7 +236,11 @@ public:
     OBJ_METHODS(PlugFrame, Steinberg::FObject)
 
 private:
+#ifdef WIN32
     HWND windowHandle = nullptr;
+#else
+    void* windowHandle = nullptr;
+#endif
 };
 
 VST3Instance::VST3Instance() {}

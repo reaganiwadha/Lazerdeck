@@ -2,7 +2,9 @@
 #include <vector>
 #include <memory>
 #include <mutex>
+#ifdef ENABLE_VST3
 #include "VST3Host.hpp"
+#endif
 
 namespace Lazerdeck {
 
@@ -14,6 +16,7 @@ public:
     // input and output are stereo interleaved float buffers
     void process(const float* input, float* output, int frames);
 
+#ifdef ENABLE_VST3
     // VST Management
     void loadVST(const std::string& path);
     void usingVST(int index, const std::string& path);
@@ -24,6 +27,7 @@ public:
     void beginDefinition();
     void markVSTDefined(int index);
     void endDefinition();
+#endif
 
     void setSampleRate(int sr);
 
@@ -33,17 +37,18 @@ public:
 
 private:
     int sampleRate;
+#ifdef ENABLE_VST3
     std::vector<std::unique_ptr<VST3Instance>> vstEffects;
     std::mutex vstMutex;
+    // Definition
+    bool isDefining = false;
+    std::vector<int> definedVSTIndices;
+#endif
     float volume = 1.0f;
     
     // Scratch buffers for VST processing
     std::vector<float> procBuffer[2]; // De-interleaved
     std::vector<float*> procPtrs;     // Pointers to procBuffer
-
-    // Definition
-    bool isDefining = false;
-    std::vector<int> definedVSTIndices;
 };
 
 class Mixer {

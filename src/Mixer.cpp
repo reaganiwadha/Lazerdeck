@@ -34,6 +34,7 @@ void MixerChannel::process(const float* input, float* output, int frames) {
     procPtrs[0] = procBuffer[0].data();
     procPtrs[1] = procBuffer[1].data();
 
+#ifdef ENABLE_VST3
     // Process VSTs
     {
         std::lock_guard<std::mutex> lock(vstMutex);
@@ -43,6 +44,7 @@ void MixerChannel::process(const float* input, float* output, int frames) {
             }
         }
     }
+#endif
 
     // Interleave and accumulate to output
     // Output is assumed to be zeroed or contain other signal? 
@@ -54,6 +56,7 @@ void MixerChannel::process(const float* input, float* output, int frames) {
     }
 }
 
+#ifdef ENABLE_VST3
 void MixerChannel::loadVST(const std::string& path) {
     auto instance = VST3Host::getInstance().createInstance(path, sampleRate, 2048);
     if (instance) {
@@ -145,6 +148,7 @@ void MixerChannel::endDefinition() {
     
     isDefining = false;
 }
+#endif
 
 Mixer::Mixer(int numChannels, int sr) : sampleRate(sr) {
     for (int i = 0; i < numChannels; ++i) {

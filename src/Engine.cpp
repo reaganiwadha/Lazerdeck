@@ -6,8 +6,10 @@
 #include <thread>
 
 #ifdef _WIN32
+#ifdef ENABLE_VST3
 #include <objbase.h>
 #include <windows.h>
+#endif
 #endif
 
 Engine::Engine() : running(false), samplesPerPixel(50), activeDeckIndex(0), sampleRate(44100) {}
@@ -16,13 +18,17 @@ Engine::~Engine() {
     if (oscHandler) oscHandler->stop();
     audioEngine.stop();
 #ifdef _WIN32
+#ifdef ENABLE_VST3
     CoUninitialize();
+#endif
 #endif
 }
 
 bool Engine::init(int numDecks) {
 #ifdef _WIN32
+#ifdef ENABLE_VST3
     CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+#endif
 #endif
     if (!renderer.init()) {
         Logger::error("Renderer initialization failed");
@@ -58,10 +64,12 @@ bool Engine::init(int numDecks) {
     oscHandler = std::make_unique<OSCHandler>(this, 9000);
     oscHandler->start();
 
+#ifdef ENABLE_VST3
     std::thread scanThread([this]() {
         scanVSTs();
     });
     scanThread.detach();
+#endif
 
     Logger::info("Lazerdeck Mixer Ready with " + std::to_string(numDecks) + " decks!");
     Logger::info("Controls:");
@@ -421,6 +429,7 @@ void Engine::executeAction(const TriggerAction& action) {
      }
  }
 
+#ifdef ENABLE_VST3
 void Engine::scanVSTs() {
     Logger::info("Scanning VST3 plugins in C:\\Program Files\\Common Files\\VST3...");
 
@@ -445,18 +454,23 @@ void Engine::scanVSTs() {
 
     Logger::info("Found " + std::to_string(vstPaths.size()) + " VST3 plugins");
 }
+#endif
 
 void Engine::handleSystemCommand(const std::string& cmd, const osc::ReceivedMessage& m) {
     auto it = m.ArgumentsBegin();
 
     try {
         if (cmd == "printVSTs") {
+#ifdef ENABLE_VST3
             std::lock_guard<std::mutex> lock(vstMutex);
             Logger::info("--- Available VST3 Plugins ---");
             for (size_t i = 0; i < vstPaths.size(); ++i) {
                 Logger::info("  [" + std::to_string(i) + "] " + vstPaths[i]);
             }
             Logger::info("Total: " + std::to_string(vstPaths.size()) + " plugins");
+#else
+            Logger::info("VST3 support is disabled in this build.");
+#endif
         }
         else if (cmd == "workingDirectory") {
             if (it->IsString()) {

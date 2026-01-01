@@ -5,7 +5,9 @@
 #include "Deck.hpp"
 #include "AnalysisDB.hpp"
 #include "Mixer.hpp"
+#ifdef ENABLE_VST3
 #include "VST3Host.hpp"
+#endif
 #include <SDL2/SDL.h>
 #include <memory>
 #include <vector>
@@ -36,7 +38,9 @@ private:
     void updateSync();
     void checkTriggers();
     void executeAction(const TriggerAction& action);
+#ifdef ENABLE_VST3
     void scanVSTs();
+#endif
 
     bool running;
     Renderer renderer;
@@ -61,7 +65,9 @@ private:
     std::vector<std::function<void()>> taskQueue;
     std::mutex taskMutex;
 
+#ifdef ENABLE_VST3
     std::vector<std::string> vstPaths;
     std::mutex vstMutex;
+#endif
     std::string workingDirectory;
 };
