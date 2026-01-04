@@ -30,6 +30,10 @@ int main(int argc, char *argv[]) {
         engine.pushCommand(command);
     });
 
+    QObject::connect(&editor, &ScriptEditor::appQuitRequested, [&]() {
+        app.quit();
+    });
+
     // Start Engine in a separate thread
     // Note: SDL Window creation happens in init(), so it must be called on the thread that runs the loop
     std::thread engineThread([&]() {

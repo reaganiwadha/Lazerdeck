@@ -48,8 +48,9 @@ bool Engine::init(int numDecks) {
 
     sampleRate = audioEngine.getActualSampleRate();
 
-    if (numDecks > 0) decks[0]->load("resources/znfodastica.wav", &analysisDB);
-    if (numDecks > 1) decks[1]->load("resources/glory.mp3", &analysisDB);
+    // No default tracks loaded
+    // if (numDecks > 0) decks[0]->load("resources/znfodastica.wav", &analysisDB);
+    // if (numDecks > 1) decks[1]->load("resources/glory.mp3", &analysisDB);
 
     if (!audioEngine.start()) {
         Logger::error("Failed to start AudioEngine");

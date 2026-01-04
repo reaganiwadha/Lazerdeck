@@ -5,6 +5,10 @@
 #include <QStringListModel>
 #include <QApplication>
 #include <QTimer>
+#include <QFileDialog>
+#include <QMessageBox>
+#include <QTextStream>
+#include <QFileInfo>
 
 // --- ConsoleEdit ---
 
@@ -52,10 +56,9 @@ void ConsoleEdit::focusInEvent(QFocusEvent *e) {
 }
 
 void ConsoleEdit::keyPressEvent(QKeyEvent *e) {
-    // Priority: Ctrl+Enter (Execute)
     if ((e->key() == Qt::Key_Return || e->key() == Qt::Key_Enter) && (e->modifiers() & Qt::ControlModifier)) {
         if (c && c->popup()->isVisible()) {
-             c->popup()->hide(); // Close popup if open
+             c->popup()->hide(); 
         }
         
         QTextCursor cursor = textCursor();
@@ -67,7 +70,7 @@ void ConsoleEdit::keyPressEvent(QKeyEvent *e) {
             emit commandSubmitted(cmd);
             emit flashLineRequest();
         }
-        e->accept(); // Consume event
+        e->accept();
         return;
     }
 
@@ -84,13 +87,6 @@ void ConsoleEdit::keyPressEvent(QKeyEvent *e) {
         }
     }
 
-    bool isShortcut = ((e->modifiers() & Qt::ControlModifier) && e->key() == Qt::Key_E); 
-    if (!c || !isShortcut) {
-        // Check for Ctrl+Enter to send command
-        // Removed from here since we moved it up
-    }
-
-    // Pass to base class
     QPlainTextEdit::keyPressEvent(e);
 
     const bool ctrlOrShift = e->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier);
@@ -99,6 +95,8 @@ void ConsoleEdit::keyPressEvent(QKeyEvent *e) {
     static QString eow = QString::fromStdString(R"(~!@#$%^&*()_+{}|:\"<>?,./;'[]\- =)"); 
     bool hasModifier = (e->modifiers() != Qt::NoModifier) && !ctrlOrShift;
     QString completionPrefix = textUnderCursor();
+
+    bool isShortcut = ((e->modifiers() & Qt::ControlModifier) && e->key() == Qt::Key_E); 
 
     if (!isShortcut && (hasModifier || e->text().isEmpty()|| completionPrefix.length() < 1
                       || eow.contains(e->text().right(1)))) {
@@ -117,14 +115,48 @@ void ConsoleEdit::keyPressEvent(QKeyEvent *e) {
 
 // --- ScriptEditor (Container) ---
 
-ScriptEditor::ScriptEditor(QWidget *parent) : QWidget(parent) {
-    setWindowTitle("Lazerdeck Console");
-    resize(600, 300);
+ScriptEditor::ScriptEditor(QWidget *parent) : QWidget(parent), isModified(false) {
+    setWindowTitle("Lazerdeck Console - Untitled");
+    resize(600, 400);
     setStyleSheet("background-color: #21222c;");
 
     QVBoxLayout *layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
+
+    // Menu Bar
+    QMenuBar *menuBar = new QMenuBar(this);
+    menuBar->setStyleSheet("QMenuBar { background-color: #191a21; color: #f8f8f2; } QMenuBar::item:selected { background-color: #44475a; } QMenu { background-color: #282a36; color: #f8f8f2; border: 1px solid #44475a; } QMenu::item:selected { background-color: #44475a; }");
+    
+    QMenu *fileMenu = menuBar->addMenu("&File");
+    
+    QAction *newAct = fileMenu->addAction("&New");
+    newAct->setShortcut(QKeySequence::New);
+    connect(newAct, &QAction::triggered, this, &ScriptEditor::newFile);
+    
+    QAction *openAct = fileMenu->addAction("&Open...");
+    openAct->setShortcut(QKeySequence::Open);
+    connect(openAct, &QAction::triggered, this, &ScriptEditor::openFile);
+    
+    QAction *saveAct = fileMenu->addAction("&Save");
+    saveAct->setShortcut(QKeySequence::Save);
+    connect(saveAct, &QAction::triggered, this, [this]() { saveFile(); });
+
+    QAction *saveAsAct = fileMenu->addAction("Save &As...");
+    connect(saveAsAct, &QAction::triggered, this, &ScriptEditor::saveFileAs);
+    
+    fileMenu->addSeparator();
+
+    QAction *demoAct = fileMenu->addAction("Open &Demo Script");
+    connect(demoAct, &QAction::triggered, this, &ScriptEditor::openDemo);
+    
+    fileMenu->addSeparator();
+
+    QAction *exitAct = fileMenu->addAction("E&xit");
+    exitAct->setShortcut(QKeySequence::Quit);
+    connect(exitAct, &QAction::triggered, this, &QWidget::close);
+
+    layout->setMenuBar(menuBar);
 
     editor = new ConsoleEdit(this);
     highlighter = new LazerHighlighter(editor->document());
@@ -140,29 +172,26 @@ ScriptEditor::ScriptEditor(QWidget *parent) : QWidget(parent) {
     QCompleter *completer = new QCompleter(this);
     QStringList words;
     words << "play" << "pause" << "stop" << "load" << "s" << "restart";
-    for(int i=1; i<=8; ++i) words << QString("$d%1").arg(i); // Update to $d1
+    for(int i=1; i<=8; ++i) words << QString("$d%1").arg(i); 
     
     completer->setModel(new QStringListModel(words, completer));
     completer->setCaseSensitivity(Qt::CaseInsensitive);
     completer->setWrapAround(false);
     editor->setCompleter(completer);
     
-    editor->setPlainText("# Lazerdeck Console\n# $d1 load \"file.mp3\"\n# $d1 play\n$d1 ");
-    QTextCursor tc = editor->textCursor();
-    tc.movePosition(QTextCursor::End);
-    editor->setTextCursor(tc);
-
     connect(editor, &ConsoleEdit::commandSubmitted, this, &ScriptEditor::onCommandSubmitted);
     connect(editor, &ConsoleEdit::flashLineRequest, this, &ScriptEditor::flashCurrentLine);
+    connect(editor->document(), &QTextDocument::contentsChanged, this, &ScriptEditor::onTextChanged);
+
+    setCurrentFile("");
 }
 
 void ScriptEditor::onCommandSubmitted(const QString &cmd) {
     statusLabel->setText("Last: " + cmd);
     statusLabel->setStyleSheet("color: #50fa7b; background-color: #191a21; padding: 4px; font-family: Consolas; font-size: 12px;");
     
-    emit commandExecuted(cmd); // Forward signal
+    emit commandExecuted(cmd);
 
-    // Reset status color after delay
     QTimer::singleShot(1000, [this]() {
          statusLabel->setStyleSheet("color: #6272a4; background-color: #191a21; padding: 4px; font-family: Consolas; font-size: 12px;");
     });
@@ -180,4 +209,131 @@ void ScriptEditor::flashCurrentLine() {
     QTimer::singleShot(150, [this]() {
         editor->setExtraSelections({});
     });
+}
+
+void ScriptEditor::onTextChanged() {
+    if (!isModified) {
+        isModified = true;
+        setWindowModified(true);
+        setWindowTitle("Lazerdeck Console - " + (currentFile.isEmpty() ? "Untitled" : QFileInfo(currentFile).fileName()) + "*");
+    }
+}
+
+void ScriptEditor::closeEvent(QCloseEvent *event) {
+    if (maybeSave()) {
+        emit appQuitRequested();
+        event->accept();
+    } else {
+        event->ignore();
+    }
+}
+
+void ScriptEditor::newFile() {
+    if (maybeSave()) {
+        editor->clear();
+        setCurrentFile("");
+    }
+}
+
+void ScriptEditor::openFile() {
+    if (maybeSave()) {
+        QString fileName = QFileDialog::getOpenFileName(this, "Open Script", "", "Lazer Scripts (*.lazerscript *.txt);;All Files (*)");
+        if (!fileName.isEmpty())
+            loadFile(fileName);
+    }
+}
+
+void ScriptEditor::saveFile() {
+    if (currentFile.isEmpty()) {
+        saveFileAs();
+    } else {
+        saveFile(currentFile);
+    }
+}
+
+void ScriptEditor::saveFileAs() {
+    QString fileName = QFileDialog::getSaveFileName(this, "Save Script", "", "Lazer Scripts (*.lazerscript);;Text Files (*.txt);;All Files (*)");
+    if (!fileName.isEmpty())
+        saveFile(fileName);
+}
+
+void ScriptEditor::openDemo() {
+    if (maybeSave()) {
+        editor->setPlainText(
+            "# Demo Script\n"
+            "$d1 load \"resources/znfodastica.wav\"\n"
+            "$d2 load \"resources/glory.mp3\"\n"
+            "$d1 play\n"
+            "$d2 play\n"
+        );
+        setCurrentFile("");
+        isModified = true;
+        setWindowModified(true);
+        setWindowTitle("Lazerdeck Console - Untitled*");
+    }
+}
+
+bool ScriptEditor::maybeSave() {
+    if (!isModified)
+        return true;
+    
+    const QMessageBox::StandardButton ret = QMessageBox::warning(this, "Lazerdeck Console",
+                               "The document has been modified.\n"
+                               "Do you want to save your changes?",
+                               QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel);
+    switch (ret) {
+    case QMessageBox::Save:
+        saveFile();
+        return !isModified; 
+    case QMessageBox::Cancel:
+        return false;
+    default:
+        break;
+    }
+    return true;
+}
+
+void ScriptEditor::loadFile(const QString &fileName) {
+    QFile file(fileName);
+    if (!file.open(QFile::ReadOnly | QFile::Text)) {
+        QMessageBox::warning(this, "Lazerdeck Console", "Cannot read file " + fileName + ":\n" + file.errorString());
+        return;
+    }
+
+    QTextStream in(&file);
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    editor->setPlainText(in.readAll());
+    QApplication::restoreOverrideCursor();
+
+    setCurrentFile(fileName);
+}
+
+bool ScriptEditor::saveFile(const QString &fileName) {
+    QFile file(fileName);
+    if (!file.open(QFile::WriteOnly | QFile::Text)) {
+        QMessageBox::warning(this, "Lazerdeck Console", "Cannot write file " + fileName + ":\n" + file.errorString());
+        return false;
+    }
+
+    QTextStream out(&file);
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    out << editor->toPlainText();
+    QApplication::restoreOverrideCursor();
+
+    setCurrentFile(fileName);
+    return true;
+}
+
+void ScriptEditor::setCurrentFile(const QString &fileName) {
+    currentFile = fileName;
+    isModified = false;
+    setWindowModified(false);
+    
+    QString shownName = currentFile;
+    if (currentFile.isEmpty())
+        shownName = "Untitled";
+    else
+        shownName = QFileInfo(currentFile).fileName();
+    
+    setWindowTitle("Lazerdeck Console - " + shownName);
 }
