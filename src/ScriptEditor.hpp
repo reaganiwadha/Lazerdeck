@@ -1,19 +1,23 @@
 #pragma once
 
+#include <QWidget>
 #include <QPlainTextEdit>
 #include <QCompleter>
-#include <QWidget>
+#include <QLabel>
+#include <QVBoxLayout>
+#include "LazerHighlighter.hpp"
 
-class ScriptEditor : public QPlainTextEdit {
+class ConsoleEdit : public QPlainTextEdit {
     Q_OBJECT
 
 public:
-    explicit ScriptEditor(QWidget *parent = nullptr);
+    explicit ConsoleEdit(QWidget *parent = nullptr);
     void setCompleter(QCompleter *c);
     QCompleter *completer() const;
 
 signals:
-    void commandExecuted(const QString &cmd);
+    void commandSubmitted(const QString &cmd);
+    void flashLineRequest();
 
 protected:
     void keyPressEvent(QKeyEvent *e) override;
@@ -25,4 +29,23 @@ private slots:
 private:
     QString textUnderCursor() const;
     QCompleter *c;
+};
+
+class ScriptEditor : public QWidget {
+    Q_OBJECT
+
+public:
+    explicit ScriptEditor(QWidget *parent = nullptr);
+
+signals:
+    void commandExecuted(const QString &cmd);
+
+private slots:
+    void onCommandSubmitted(const QString &cmd);
+    void flashCurrentLine();
+
+private:
+    ConsoleEdit *editor;
+    QLabel *statusLabel;
+    LazerHighlighter *highlighter;
 };

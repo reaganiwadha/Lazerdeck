@@ -69,12 +69,20 @@ void TextCache::cleanupOldTextures(uint64_t maxAgeFrames) {
 Renderer::Renderer() : textCache(nullptr, nullptr), logCache(nullptr, nullptr) {}
 
 Renderer::~Renderer() {
-    if (font) TTF_CloseFont(font);
-    if (logFont) TTF_CloseFont(logFont);
-    if (renderer) SDL_DestroyRenderer(renderer);
-    if (window) SDL_DestroyWindow(window);
-    TTF_Quit();
-    SDL_Quit();
+    shutdown();
+}
+
+void Renderer::shutdown() {
+    if (font) { TTF_CloseFont(font); font = nullptr; }
+    if (logFont) { TTF_CloseFont(logFont); logFont = nullptr; }
+    if (renderer) { SDL_DestroyRenderer(renderer); renderer = nullptr; }
+    if (window) { SDL_DestroyWindow(window); window = nullptr; }
+    // Only call Quit if we initialized?
+    // TTF_Quit and SDL_Quit are ref-counted internally by SDL usually, but explicit Quit is fine.
+    // However, calling them multiple times is okay.
+    // Ideally we should track if we initialized.
+    // But since Renderer is a member of Engine, and Engine is a singleton-ish in main,
+    // this will only run once.
 }
 
 bool Renderer::init() {

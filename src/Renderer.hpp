@@ -42,6 +42,7 @@ public:
     ~Renderer();
 
     bool init();
+    void shutdown();
     void clear();
     void present();
     

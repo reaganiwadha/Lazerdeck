@@ -4,8 +4,7 @@
 #include "OSCHandler.hpp"
 #include <filesystem>
 #include <thread>
-#include "ScriptEditor.hpp"
-#include <QApplication>
+#include <sstream>
 
 #ifdef _WIN32
 #ifdef ENABLE_VST3
@@ -17,14 +16,7 @@
 Engine::Engine() : running(false), samplesPerPixel(50), activeDeckIndex(0), sampleRate(44100) {}
 
 Engine::~Engine() {
-    if (oscHandler) oscHandler->stop();
-    audioEngine.stop();
-    if (scriptEditor) delete scriptEditor;
-#ifdef _WIN32
-#ifdef ENABLE_VST3
-    CoUninitialize();
-#endif
-#endif
+    stop();
 }
 
 bool Engine::init(int numDecks) {
@@ -100,15 +92,6 @@ bool Engine::init(int numDecks) {
                       std::to_string(audioEngine.getBitDepth()) + "-bit | " + backend;
     renderer.setWindowTitle(title);
 
-    // Initialize ScriptEditor (Qt)
-    scriptEditor = new ScriptEditor();
-    QObject::connect(scriptEditor, &ScriptEditor::commandExecuted, [this](const QString &cmd) {
-        std::string command = cmd.toStdString();
-        Logger::info("Script Command: " + command);
-        // TODO: Parse command
-    });
-    scriptEditor->show();
-
     return true;
 }
 
@@ -117,7 +100,42 @@ void Engine::run() {
     const double targetFrameTimeNs = targetFrameTimeMs * 1000000.0;
 
     while (running) {
-        QApplication::processEvents();
+        // Process external commands
+        std::string cmd;
+        while (commandQueue.try_pop(cmd)) {
+            std::istringstream iss(cmd);
+            std::string target;
+            iss >> target;
+            
+            if (target == "s") {
+                std::string action;
+                iss >> action;
+                if (action == "restart") {
+                    Logger::info("Restart requested (not implemented)");
+                }
+            } else if (target.rfind("$d", 0) == 0) { // Starts with '$d'
+                try {
+                    int deckIdx = std::stoi(target.substr(2)) - 1; // $d1 -> 0
+                    if (deckIdx >= 0 && deckIdx < decks.size()) {
+                        std::string action;
+                        iss >> action;
+                        if (action == "play") decks[deckIdx]->play();
+                        else if (action == "pause") decks[deckIdx]->pause();
+                        else if (action == "stop") { decks[deckIdx]->pause(); decks[deckIdx]->setFrame(0); }
+                        else if (action == "load") {
+                            std::string remaining;
+                            std::getline(iss, remaining);
+                            size_t first = remaining.find_first_not_of(" \t\"");
+                            if (std::string::npos != first) {
+                                size_t last = remaining.find_last_not_of(" \t\"");
+                                std::string path = remaining.substr(first, (last - first + 1));
+                                decks[deckIdx]->load(path, &analysisDB);
+                            }
+                        }
+                    }
+                } catch (...) {}
+            }
+        }
 
         uint64_t frameStartPerf = SDL_GetPerformanceCounter();
 
@@ -159,11 +177,32 @@ void Engine::run() {
             SDL_Delay((uint32_t)(sleepTimeMs));
         }
     }
+    
+    shutdown();
 }
 
 void Engine::queueTask(std::function<void()> task) {
     std::lock_guard<std::mutex> lock(taskMutex);
     taskQueue.push_back(task);
+}
+
+void Engine::pushCommand(const std::string& cmd) {
+    commandQueue.push(cmd);
+}
+
+void Engine::stop() {
+    running = false;
+}
+
+void Engine::shutdown() {
+    if (oscHandler) oscHandler->stop();
+    audioEngine.stop();
+    renderer.shutdown();
+#ifdef _WIN32
+#ifdef ENABLE_VST3
+    CoUninitialize();
+#endif
+#endif
 }
 
 void Engine::processTasks() {

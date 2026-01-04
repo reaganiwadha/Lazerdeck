@@ -153,6 +153,7 @@ set(SRCS
     src/Engine_Sync.cpp
     src/Mixer.cpp
     src/ScriptEditor.cpp
+    src/LazerHighlighter.cpp
     ${OSCPACK_SRCS}
 )
 

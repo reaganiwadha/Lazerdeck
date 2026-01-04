@@ -14,9 +14,9 @@
 #include <functional>
 #include <mutex>
 #include <osc/OscReceivedElements.h>
+#include "ThreadSafeQueue.hpp"
 
 class OSCHandler;
-class ScriptEditor;
 
 class Engine {
 public:
@@ -25,6 +25,9 @@ public:
 
     bool init(int numDecks = 2);
     void run();
+    void stop(); // Add stop method to break the loop safely
+
+    void pushCommand(const std::string& cmd);
 
     void handleOSCCommand(int deckIdx, const std::string& cmd, const osc::ReceivedMessage& m);
     void handleSystemCommand(const std::string& cmd, const osc::ReceivedMessage& m);
@@ -39,6 +42,7 @@ private:
     void updateSync();
     void checkTriggers();
     void executeAction(const TriggerAction& action);
+    void shutdown();
 #ifdef ENABLE_VST3
     void scanVSTs();
 #endif
@@ -71,5 +75,5 @@ private:
     std::mutex vstMutex;
 #endif
     std::string workingDirectory;
-    ScriptEditor* scriptEditor = nullptr;
+    ThreadSafeQueue<std::string> commandQueue;
 };
