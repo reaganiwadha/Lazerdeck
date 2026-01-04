@@ -16,6 +16,7 @@
 #include <osc/OscReceivedElements.h>
 
 class OSCHandler;
+class ScriptEditor;
 
 class Engine {
 public:
@@ -70,4 +71,5 @@ private:
     std::mutex vstMutex;
 #endif
     std::string workingDirectory;
+    ScriptEditor* scriptEditor = nullptr;
 };

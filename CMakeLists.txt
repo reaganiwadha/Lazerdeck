@@ -19,6 +19,9 @@ option(ENABLE_VST3 "Enable VST3 support" ON)
 # --------------------------------------------------
 # Dependencies
 # --------------------------------------------------
+find_package(Qt6 COMPONENTS Widgets REQUIRED)
+set(CMAKE_AUTOMOC ON)
+
 if (WIN32)
     # vcpkg / Windows (CONFIG mode only)
     find_package(SDL2 CONFIG REQUIRED)
@@ -149,6 +152,7 @@ set(SRCS
     src/Engine_OSC.cpp
     src/Engine_Sync.cpp
     src/Mixer.cpp
+    src/ScriptEditor.cpp
     ${OSCPACK_SRCS}
 )
 
@@ -247,6 +251,7 @@ if (WIN32)
         uuid
         ws2_32
         iphlpapi
+        Qt6::Widgets
     )
 else()
     target_link_libraries(lazerdeck PRIVATE

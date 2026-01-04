@@ -4,6 +4,8 @@
 #include "OSCHandler.hpp"
 #include <filesystem>
 #include <thread>
+#include "ScriptEditor.hpp"
+#include <QApplication>
 
 #ifdef _WIN32
 #ifdef ENABLE_VST3
@@ -17,6 +19,7 @@ Engine::Engine() : running(false), samplesPerPixel(50), activeDeckIndex(0), samp
 Engine::~Engine() {
     if (oscHandler) oscHandler->stop();
     audioEngine.stop();
+    if (scriptEditor) delete scriptEditor;
 #ifdef _WIN32
 #ifdef ENABLE_VST3
     CoUninitialize();
@@ -97,6 +100,15 @@ bool Engine::init(int numDecks) {
                       std::to_string(audioEngine.getBitDepth()) + "-bit | " + backend;
     renderer.setWindowTitle(title);
 
+    // Initialize ScriptEditor (Qt)
+    scriptEditor = new ScriptEditor();
+    QObject::connect(scriptEditor, &ScriptEditor::commandExecuted, [this](const QString &cmd) {
+        std::string command = cmd.toStdString();
+        Logger::info("Script Command: " + command);
+        // TODO: Parse command
+    });
+    scriptEditor->show();
+
     return true;
 }
 
@@ -105,6 +117,8 @@ void Engine::run() {
     const double targetFrameTimeNs = targetFrameTimeMs * 1000000.0;
 
     while (running) {
+        QApplication::processEvents();
+
         uint64_t frameStartPerf = SDL_GetPerformanceCounter();
 
         // Process tasks queued from other threads (e.g., OSC)
