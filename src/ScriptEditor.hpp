@@ -58,6 +58,7 @@ private slots:
     void saveFile();
     void saveFileAs();
     void openDemo();
+    void showHelp();
 
 private:
     bool maybeSave();

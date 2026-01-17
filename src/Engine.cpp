@@ -133,6 +133,85 @@ void Engine::run() {
                                 decks[deckIdx]->load(path, &analysisDB);
                             }
                         }
+                        else if (action == "seek") {
+                            float seconds;
+                            if (iss >> seconds) {
+                                decks[deckIdx]->seek((int64_t)(seconds * sampleRate));
+                            }
+                        }
+                        else if (action == "speed") {
+                            double speed;
+                            if (iss >> speed) {
+                                decks[deckIdx]->setSpeed(speed);
+                            }
+                        }
+                        else if (action == "volume") {
+                            float vol;
+                            if (iss >> vol && mixer) {
+                                mixer->getChannel(deckIdx)->setVolume(vol);
+                            }
+                        }
+                        else if (action == "sync") {
+                            int sourceIdx;
+                            if (iss >> sourceIdx) {
+                                // 1-based index from user
+                                if (sourceIdx >= 1 && sourceIdx <= decks.size()) {
+                                    decks[deckIdx]->setSync(true, sourceIdx - 1);
+                                } else if (sourceIdx == 0) {
+                                    decks[deckIdx]->setSync(false);
+                                }
+                            }
+                        }
+                        else if (action == "loop") {
+                            float startBeat, endBeat;
+                            if (iss >> startBeat >> endBeat) {
+                                float bpm = decks[deckIdx]->getBPM();
+                                if (bpm > 0) {
+                                    float offset = decks[deckIdx]->getBeatOffset();
+                                    double framesPerBeat = (double)sampleRate * 60.0 / (double)bpm;
+                                    uint64_t startFrame = (uint64_t)(startBeat * framesPerBeat + offset);
+                                    uint64_t endFrame = (uint64_t)(endBeat * framesPerBeat + offset);
+                                    decks[deckIdx]->setLoopRange(startFrame, endFrame);
+                                }
+                            }
+                        }
+                        else if (action == "loop_exit") {
+                            decks[deckIdx]->exitLoop();
+                        }
+                        else if (action == "cue") {
+                            int id;
+                            if (iss >> id) {
+                                float bpm = decks[deckIdx]->getBPM();
+                                if (bpm > 0) {
+                                    float offset = decks[deckIdx]->getBeatOffset();
+                                    uint64_t current = decks[deckIdx]->getCurrentFrame();
+                                    double framesPerBeat = (double)sampleRate * 60.0 / (double)bpm;
+                                    float beat = (float)(((double)current - offset) / framesPerBeat);
+                                    decks[deckIdx]->addTrigger(id, beat);
+                                    // Add default play action for this trigger so it works as a hot cue
+                                    decks[deckIdx]->addTriggerAction(id, { deckIdx, "play", {} });
+                                }
+                            }
+                        }
+                        else if (action == "goto_cue") {
+                            int id;
+                            if (iss >> id) {
+                                auto& triggers = decks[deckIdx]->getTriggers();
+                                for (const auto& t : triggers) {
+                                    if (t.id == id) {
+                                        float bpm = decks[deckIdx]->getBPM();
+                                        if (bpm > 0) {
+                                            float offset = decks[deckIdx]->getBeatOffset();
+                                            double framesPerBeat = (double)sampleRate * 60.0 / (double)bpm;
+                                            uint64_t frame = (uint64_t)(t.beat * framesPerBeat + offset);
+                                            decks[deckIdx]->setFrame(frame);
+                                            decks[deckIdx]->resetTriggers();
+                                        }
+                                        break;
+                                    }
+                                }
+                            }
+                        }
                     }
                 } catch (...) {}
             }

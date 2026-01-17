@@ -156,6 +156,11 @@ ScriptEditor::ScriptEditor(QWidget *parent) : QWidget(parent), isModified(false)
     exitAct->setShortcut(QKeySequence::Quit);
     connect(exitAct, &QAction::triggered, this, &QWidget::close);
 
+    QMenu *helpMenu = menuBar->addMenu("&Help");
+    QAction *helpAct = helpMenu->addAction("&Command Reference");
+    helpAct->setShortcut(QKeySequence::HelpContents);
+    connect(helpAct, &QAction::triggered, this, &ScriptEditor::showHelp);
+
     layout->setMenuBar(menuBar);
 
     editor = new ConsoleEdit(this);
@@ -171,7 +176,7 @@ ScriptEditor::ScriptEditor(QWidget *parent) : QWidget(parent), isModified(false)
     // Completer
     QCompleter *completer = new QCompleter(this);
     QStringList words;
-    words << "play" << "pause" << "stop" << "load" << "s" << "restart";
+    words << "play" << "pause" << "stop" << "load" << "speed" << "seek" << "volume" << "sync" << "loop" << "loop_exit" << "cue" << "goto_cue" << "s" << "restart";
     for(int i=1; i<=8; ++i) words << QString("$d%1").arg(i); 
     
     completer->setModel(new QStringListModel(words, completer));
@@ -271,6 +276,32 @@ void ScriptEditor::openDemo() {
         setWindowModified(true);
         setWindowTitle("Lazerdeck Console - Untitled*");
     }
+}
+
+void ScriptEditor::showHelp() {
+    QMessageBox::information(this, "Lazerdeck Command Reference",
+        "<h3>Available Commands</h3>"
+        "<p>Commands start with <b>$dX</b> where X is the deck number (1-8).</p>"
+        "<ul>"
+        "<li><b>$dX play</b> - Start playback</li>"
+        "<li><b>$dX pause</b> - Pause playback</li>"
+        "<li><b>$dX stop</b> - Stop and rewind to start</li>"
+        "<li><b>$dX load \"path/to/file\"</b> - Load an audio file</li>"
+        "<li><b>$dX speed &lt;factor&gt;</b> - Set playback speed (e.g. 1.0, 1.2, 0.8)</li>"
+        "<li><b>$dX seek &lt;seconds&gt;</b> - Jump relative in seconds</li>"
+        "<li><b>$dX volume &lt;level&gt;</b> - Set volume (0.0 - 1.0)</li>"
+        "<li><b>$dX sync &lt;deck&gt;</b> - Sync to another deck (e.g. $d1 sync 2)</li>"
+        "<li><b>$dX loop &lt;start&gt; &lt;end&gt;</b> - Set loop in beats</li>"
+        "<li><b>$dX loop_exit</b> - Exit loop</li>"
+        "<li><b>$dX cue &lt;id&gt;</b> - Set hot cue at current position</li>"
+        "<li><b>$dX goto_cue &lt;id&gt;</b> - Jump to hot cue</li>"
+        "</ul>"
+        "<p><b>Shortcuts:</b></p>"
+        "<ul>"
+        "<li><b>Ctrl+Enter</b> - Run current line</li>"
+        "<li><b>Ctrl+Space</b> - Auto-complete</li>"
+        "</ul>"
+    );
 }
 
 bool ScriptEditor::maybeSave() {
