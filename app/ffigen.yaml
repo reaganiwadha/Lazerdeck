@@ -1,0 +1,19 @@
+# Optional: regenerate Dart bindings from the engine's public header.
+#
+# The committed bindings in lib/ffi/lazerdeck_bindings.dart are hand-written so
+# the build needs no LLVM. If you prefer generation, install LLVM/clang, add
+# `ffigen` to dev_dependencies, and run `dart run ffigen` from app/.
+name: LazerdeckGenBindings
+description: Generated dart:ffi bindings for the Lazerdeck engine.
+output: 'lib/ffi/lazerdeck_generated.dart'
+headers:
+  entry-points:
+    - '../engine/include/lazerdeck/lazerdeck.h'
+  include-directives:
+    - '**/lazerdeck.h'
+preamble: |
+  // GENERATED — do not edit by hand. See ffigen.yaml.
+  // ignore_for_file: type=lint
+comments:
+  style: any
+  length: full

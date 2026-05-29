@@ -1,70 +1,40 @@
 # Building Lazerdeck
 
-Lazerdeck supports Windows, Linux, and macOS.
-It also supports a VST3 plugin host, which can be disabled for platforms that don't need it or for easier building.
+> Lazerdeck was re-architected onto a **headless C++ engine + Flutter desktop
+> host**. The old SDL2/Qt/vcpkg/FFTW build is gone. Full, current build and
+> tooling instructions live in **[docs/07-build-and-tooling.md](docs/07-build-and-tooling.md)**;
+> start with **[docs/00-overview.md](docs/00-overview.md)**.
 
-## Build Options
+## TL;DR
 
-- `ENABLE_VST3` (Default: ON): Enable VST3 hosting support. Requires VST3 SDK (fetched automatically).
+Run the app (builds the engine automatically, no vcpkg/Qt/SDL):
 
-## Linux
-
-### Dependencies
-Install the required development packages:
-
-**Ubuntu / Debian:**
 ```bash
-sudo apt-get install cmake build-essential pkg-config \
-    libsdl2-dev libsdl2-ttf-dev libportaudio2 portaudio19-dev \
-    libfftw3-dev libsndfile1-dev
+cd app
+flutter run -d windows      # or: flutter run -d linux
 ```
 
-**Fedora:**
+Build the engine library standalone (CI / smoke test):
+
 ```bash
-sudo dnf install cmake gcc-c++ make pkgconf-pkg-config \
-    SDL2-devel SDL2_ttf-devel portaudio-devel fftw-devel libsndfile-devel
+cmake --preset windows-msvc        # or: cmake --preset default   (Linux)
+cmake --build build-windows --config Debug --target lazerdeck_engine
 ```
 
-### Build Instructions
-```bash
-# Build with VST3 support (default)
-cmake -B build
-cmake --build build
+Build the optional VST3 host plugin (not needed for normal use):
 
-# Build WITHOUT VST3 support (recommended for initial setup or minimal build)
-cmake -B build_novst -DENABLE_VST3=OFF
-cmake --build build_novst
+```bash
+cmake --preset windows-msvc -DLAZERDECK_BUILD_VST3=ON
+cmake --build build-windows --config Debug --target lazerdeck_vst3
 ```
 
-## Windows
+## Requirements
 
-### Dependencies
-- Visual Studio 2022 (or newer) with C++ Desktop Development workload.
-- CMake (bundled with VS or standalone).
-- Dependencies (SDL2, etc.) are best managed via `vcpkg`.
+- **Windows:** Visual Studio 2022 (MSVC + CMake), Git, Flutter 3.44+ (Windows desktop).
+- **Linux:** GCC/Clang, CMake ≥ 3.20, Git, `libgtk-3-dev`, `libasound2-dev`, Flutter (Linux desktop).
+- Network on first configure (dependencies are fetched via CMake FetchContent).
 
-### Build Instructions
-1. Open the folder in Visual Studio.
-2. Let CMake configure the project.
-3. Select your target (e.g., `lazerdeck.exe`).
-4. Build.
-
-Alternatively, via command line with `vcpkg` toolchain:
-```bash
-cmake -B build -DCMAKE_TOOLCHAIN_FILE=C:/path/to/vcpkg/scripts/buildsystems/vcpkg.cmake
-cmake --build build --config Release
-```
-
-## macOS
-
-### Dependencies
-Install dependencies using Homebrew:
-```bash
-brew install sdl2 sdl2_ttf portaudio fftw
-```
-
-### Build Instructions
-```bash
-cmake -B build
-cmake --build build
-```
+All native dependencies (PortAudio, RubberBand, SoundTouch, oscpack) are fetched
+and built automatically — no system packages, no vcpkg. See
+[docs/07-build-and-tooling.md](docs/07-build-and-tooling.md) for details and the
+FFTW/Flutter-install gotchas.

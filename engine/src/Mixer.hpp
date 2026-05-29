@@ -2,50 +2,53 @@
 #include <vector>
 #include <memory>
 #include <mutex>
-#ifdef ENABLE_VST3
-#include "VST3Host.hpp"
-#endif
+#include <string>
 
 namespace Lazerdeck {
+
+// One effect slot in a channel. `handle` is an opaque instance owned by the
+// dynamically-loaded VST3 plugin (see Vst3Runtime / vst3_abi.h).
+struct VstSlot {
+    void* handle = nullptr;
+    std::string path;
+};
 
 class MixerChannel {
 public:
     MixerChannel(int sampleRate);
-    
-    // Processes input, adds to output (accumulation)
-    // input and output are stereo interleaved float buffers
+    ~MixerChannel();
+
+    // Processes input, adds to output (accumulation).
+    // input and output are stereo interleaved float buffers.
     void process(const float* input, float* output, int frames);
 
-#ifdef ENABLE_VST3
-    // VST Management
+    // VST management. All of these are safe no-ops when the VST3 runtime
+    // (lazerdeck_vst3) is not available.
     void loadVST(const std::string& path);
     void usingVST(int index, const std::string& path);
     void showVST(int index);
     void setVSTParameter(int vstIdx, int paramIdx, float value);
     void clearVSTs();
-    
+
     void beginDefinition();
     void markVSTDefined(int index);
     void endDefinition();
-#endif
 
     void setSampleRate(int sr);
 
-    // Volume/Pan (Future)
     void setVolume(float v) { volume = v; }
     float getVolume() const { return volume; }
 
 private:
+    void destroySlot(VstSlot& slot); // requires vstMutex held
+
     int sampleRate;
-#ifdef ENABLE_VST3
-    std::vector<std::unique_ptr<VST3Instance>> vstEffects;
+    std::vector<VstSlot> vstEffects;
     std::mutex vstMutex;
-    // Definition
     bool isDefining = false;
     std::vector<int> definedVSTIndices;
-#endif
     float volume = 1.0f;
-    
+
     // Scratch buffers for VST processing
     std::vector<float> procBuffer[2]; // De-interleaved
     std::vector<float*> procPtrs;     // Pointers to procBuffer
@@ -54,9 +57,9 @@ private:
 class Mixer {
 public:
     Mixer(int numChannels, int sampleRate);
-    
+
     MixerChannel* getChannel(int index);
-    
+
     void setSampleRate(int sr);
 
 private:

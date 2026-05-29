@@ -1,31 +1,32 @@
 #pragma once
 
-#include "Renderer.hpp"
 #include "AudioEngine.hpp"
 #include "Deck.hpp"
 #include "AnalysisDB.hpp"
 #include "Mixer.hpp"
-#ifdef ENABLE_VST3
-#include "VST3Host.hpp"
-#endif
-#include <SDL2/SDL.h>
+#include <atomic>
 #include <memory>
 #include <vector>
 #include <functional>
 #include <mutex>
+#include <string>
 #include <osc/OscReceivedElements.h>
 #include "ThreadSafeQueue.hpp"
 
 class OSCHandler;
 
+// Headless audio engine. Owns the decks, mixer, PortAudio output and the OSC
+// listener. Has no windowing/UI dependency: the host (Flutter via the FFI in
+// lazerdeck.h, or any other front-end) drives it through commands and reads
+// state back. run() is a blocking service loop meant to run on its own thread.
 class Engine {
 public:
     Engine();
     ~Engine();
 
     bool init(int numDecks = 2);
-    void run();
-    void stop(); // Add stop method to break the loop safely
+    void run();   // blocks until stop()
+    void stop();  // breaks the loop safely (callable from another thread)
 
     void pushCommand(const std::string& cmd);
 
@@ -33,47 +34,39 @@ public:
     void handleSystemCommand(const std::string& cmd, const osc::ReceivedMessage& m);
     void queueTask(std::function<void()> task);
 
+    int   getNumDecks() const { return (int)decks.size(); }
+    int   getSampleRate() const { return sampleRate; }
+    Deck* getDeck(int idx) {
+        if (idx < 0 || idx >= (int)decks.size()) return nullptr;
+        return decks[idx].get();
+    }
+    Lazerdeck::Mixer* getMixer() { return mixer.get(); }
+
 private:
-    void handleEvents();
-    void handleGlobalInput(SDL_Event& event, bool shift);
-    void handleDeckInput(Deck* activeDeck, SDL_Event& event, bool shift);
-    void render();
+    void processCommands();   // drains the LazerScript command queue
     void processTasks();
     void updateSync();
     void checkTriggers();
     void executeAction(const TriggerAction& action);
     void shutdown();
-#ifdef ENABLE_VST3
-    void scanVSTs();
-#endif
+    void scanVSTs();          // SDK-free filesystem scan of installed .vst3 bundles
 
-    bool running;
-    Renderer renderer;
+    std::atomic<bool> running;
     AudioEngine audioEngine;
     AnalysisDB analysisDB;
     std::unique_ptr<Lazerdeck::Mixer> mixer;
     std::unique_ptr<OSCHandler> oscHandler;
-    
+
     std::vector<std::unique_ptr<Deck>> decks;
-    int activeDeckIndex;
 
-    int samplesPerPixel;
     int sampleRate;
-
-    uint64_t lastTime;
-    uint64_t frameCount;
-    uint64_t fpsTimer;
-    int currentFPS;
-    int monitorRefreshRate;
-    uint64_t perfFrequency;
 
     std::vector<std::function<void()>> taskQueue;
     std::mutex taskMutex;
 
-#ifdef ENABLE_VST3
     std::vector<std::string> vstPaths;
     std::mutex vstMutex;
-#endif
+
     std::string workingDirectory;
     ThreadSafeQueue<std::string> commandQueue;
 };

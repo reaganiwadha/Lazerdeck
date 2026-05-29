@@ -2,7 +2,7 @@
 #include "miniaudio.h"
 #include "Deck.hpp"
 #include <cmath>
-#include <SDL2/SDL.h>
+#include "Clock.hpp"
 #include "Logger.hpp"
 
 Deck::Deck(int sr) : currentFrame(0), visualFrame(0.0), playing(false), loading(false), framesAvailable(0), bpm(0.0f), beatOffset(0.0f), analyzing(false), metronomeEnabled(false), sampleRate(sr) {
@@ -517,7 +517,7 @@ void Deck::updateSampleRate(int newSampleRate) {
 
 void Deck::updateVisualFrame() {
     if (playing.load()) {
-        uint64_t now = SDL_GetTicks64();
+        uint64_t now = lzr::nowMs();
         if (lastVisualUpdateTime == 0) {
             lastVisualUpdateTime = now;
             lastVisualFrame = currentFrame.load();

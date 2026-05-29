@@ -2,23 +2,22 @@
     "version": 3,
     "configurePresets": [
         {
-            "name": "default",
-            "displayName": "Default Config",
-            "description": "Default build on Linux",
-            "binaryDir": "${sourceDir}/build",
+            "name": "windows-msvc",
+            "displayName": "Windows MSVC",
+            "description": "Standalone engine build for Windows with MSVC (no vcpkg, no Qt, no SDL)",
+            "generator": "Visual Studio 17 2022",
+            "binaryDir": "${sourceDir}/build-windows",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug"
             }
         },
         {
-            "name": "msvc-cross",
-            "displayName": "MSVC Cross-Compile",
-            "description": "Cross-compile for Windows using clang-cl",
-            "binaryDir": "${sourceDir}/build-msvc",
+            "name": "default",
+            "displayName": "Default (Linux/Unix)",
+            "description": "Standalone engine build on Linux",
+            "binaryDir": "${sourceDir}/build",
             "cacheVariables": {
-                "CMAKE_SYSTEM_NAME": "Windows",
-                "CMAKE_C_COMPILER": "clang-cl",
-                "CMAKE_CXX_COMPILER": "clang-cl"
+                "CMAKE_BUILD_TYPE": "Debug"
             }
         }
     ]

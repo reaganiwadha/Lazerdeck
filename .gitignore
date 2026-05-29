@@ -1,11 +1,22 @@
 # Build artifacts
 build/
+build-windows/
+build-msvc/
+CMakeCache.txt
+CMakeFiles/
 *.o
 *.obj
 a.out
 lazerdeck
 main
 *.exe
+
+# Flutter / Dart (app/)
+app/build/
+app/.dart_tool/
+app/.flutter-plugins
+app/.flutter-plugins-dependencies
+.vs/
 
 # Debug files
 *.dSYM/

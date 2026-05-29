@@ -24,14 +24,10 @@ void Engine::handleOSCCommand(int deckIdx, const std::string& cmd, const osc::Re
     try {
         if (cmd == "define/begin") {
             deck->beginDefinition();
-#ifdef ENABLE_VST3
             if (channel) channel->beginDefinition();
-#endif
         } else if (cmd == "define/end") {
             deck->endDefinition();
-#ifdef ENABLE_VST3
             if (channel) channel->endDefinition();
-#endif
         } else if (cmd == "load" || cmd == "using") {
             if (it->IsString()) {
                 std::string path = (it++)->AsString();
@@ -147,8 +143,7 @@ void Engine::handleOSCCommand(int deckIdx, const std::string& cmd, const osc::Re
                 deck->addTriggerAction(triggerId, action);
                 Logger::info("OSC: Added action '" + command + "' to trigger " + std::to_string(triggerId) + " on Deck " + std::to_string(deckIdx));
             }
-        } 
-#ifdef ENABLE_VST3
+        }
         else if (cmd.find("vst/") == 0) {
             auto* channel = mixer ? mixer->getChannel(deckIdx) : nullptr;
             if (channel) {
@@ -196,7 +191,6 @@ void Engine::handleOSCCommand(int deckIdx, const std::string& cmd, const osc::Re
                  Logger::warn("OSC: No mixer channel for deck " + std::to_string(deckIdx));
             }
         }
-#endif
     } catch (const std::exception& e) {
         Logger::error("OSC: Error processing command '" + cmd + "': " + std::string(e.what()));
     }
