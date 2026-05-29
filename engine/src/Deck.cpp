@@ -40,11 +40,22 @@ bool Deck::load(const std::string& filepath, AnalysisDB* db) {
     // Clear old buffer data immediately
     {
         std::lock_guard<std::mutex> lock(bufferMutex);
-        buffer = AudioBuffer(2, sampleRate, 0, {}); 
+        buffer = AudioBuffer(2, sampleRate, 0, {});
     }
+
+    // Drop the old waveform summary so the UI shows nothing until the new
+    // track starts streaming in, and reset the envelope follower so the first
+    // bins of the new track aren't compared against the previous track.
+    {
+        std::lock_guard<std::mutex> lock(waveMutex);
+        waveSummary.clear();
+    }
+    _waveEnvSlow = 0.0f;
+    _wavePrevRms = 0.0f;
 
     bpm.store(0.0f);
     beatOffset.store(0.0f);
+    bpmManual.store(false);
     
     // Reset stretcher and speed
     {
@@ -171,7 +182,9 @@ void Deck::analyzeBPMWork() {
     Logger::info("Analyzing BPM from " + std::to_string(processedFrames) + " frames...");
 
     float result = bpmDetector.getBpm();
-    if (result > 0.0f) {
+    if (bpmManual.load()) {
+        Logger::info("BPM analysis discarded (manual override in effect)");
+    } else if (result > 0.0f) {
         bpm.store(result);
         Logger::info("BPM Detected: " + std::to_string(result));
     } else {
@@ -236,12 +249,21 @@ void Deck::loaderWork(std::string filepath, AnalysisDB* db) {
         framesReadTotal += framesReadThisIter;
         
         fftEnergy.analyzeChunk(framesReadTotal - framesReadThisIter, framesReadThisIter);
-        
+
         framesAvailable.store(framesReadTotal);
-        
-        if (result != MA_SUCCESS) break; 
+
+        // FFT energy for these frames is now cached, so the bins we emit can
+        // be colored correctly. Only complete bins are appended here.
+        summarizeUpTo(framesReadTotal, false);
+
+        if (result != MA_SUCCESS) break;
     }
-    
+
+    // Flush the trailing partial bin once all frames are in, then normalize
+    // transients across the whole track so the visuals are track-relative.
+    summarizeUpTo(framesReadTotal, true);
+    normalizeWaveTransients();
+
     ma_decoder_uninit(&decoder);
 
     loading.store(false);
@@ -457,6 +479,100 @@ bool Deck::isLoading() const {
 
 uint64_t Deck::getFramesAvailable() const {
     return framesAvailable.load(std::memory_order_relaxed);
+}
+
+WaveBin Deck::makeWaveBin(uint64_t startFrame, uint32_t frameCount) const {
+    float mn = 1.0f, mx = -1.0f;
+    double sumSq = 0.0;
+    // Cap the scan per bin so wide bins stay cheap.
+    uint32_t stride = frameCount > 256 ? frameCount / 256 : 1;
+    uint32_t count = 0;
+    for (uint64_t f = startFrame; f < startFrame + frameCount; f += stride) {
+        float s = buffer.sample(f, 0);
+        if (s < mn) mn = s;
+        if (s > mx) mx = s;
+        sumSq += (double)s * s;
+        ++count;
+    }
+    if (mn > mx) { mn = 0.0f; mx = 0.0f; }
+    float rms = (count > 0) ? std::sqrt((float)(sumSq / count)) : 0.0f;
+
+    uint8_t r, g, b;
+    fftEnergy.getColorAtFrame(startFrame + frameCount / 2, r, g, b);
+    uint32_t rgba = (0xFFu << 24) | (uint32_t(r) << 16) | (uint32_t(g) << 8) | uint32_t(b);
+
+    return WaveBin{ mn, mx, rms, 0.0f, rgba }; // transient filled by summarizeUpTo
+}
+
+void Deck::summarizeUpTo(uint64_t avail, bool finalChunk) {
+    // Envelope follower coefficients (per-bin, ~5.8 ms at 44.1 kHz / 256-frame bins).
+    constexpr float kSlowAttack  = 0.02f;
+    constexpr float kSlowRelease = 0.001f;
+
+    auto addBin = [&](uint64_t start, uint32_t frames) {
+        WaveBin bin = makeWaveBin(start, frames);
+
+        // Slow envelope follower — tracks average energy, making sudden rises
+        // detectable as transients.
+        float coeff = (bin.rms > _waveEnvSlow) ? kSlowAttack : kSlowRelease;
+        _waveEnvSlow += coeff * (bin.rms - _waveEnvSlow);
+
+        // Combine envelope-follower method (energy above slow average) and
+        // log-energy method (magnitude of sudden increase vs. previous bin).
+        auto logE = [](float r) { return std::log(r + 1e-8f); };
+        float envTransient  = std::max(0.0f, bin.rms - _waveEnvSlow);
+        float logTransient  = std::max(0.0f, logE(bin.rms) - logE(_wavePrevRms));
+        bin.transient = std::max(envTransient, logTransient);
+
+        _wavePrevRms = bin.rms;
+        waveSummary.push_back(bin);
+    };
+
+    std::lock_guard<std::mutex> lock(waveMutex);
+    uint64_t startFrame = (uint64_t)waveSummary.size() * kWaveBinFrames;
+    while (startFrame + kWaveBinFrames <= avail) {
+        addBin(startFrame, kWaveBinFrames);
+        startFrame += kWaveBinFrames;
+    }
+    if (finalChunk && startFrame < avail) {
+        addBin(startFrame, (uint32_t)(avail - startFrame));
+    }
+}
+
+void Deck::normalizeWaveTransients() {
+    std::lock_guard<std::mutex> lock(waveMutex);
+    if (waveSummary.empty()) return;
+    float maxT = 1e-6f;
+    for (const auto& b : waveSummary) maxT = std::max(maxT, b.transient);
+    for (auto& b : waveSummary) {
+        b.transient /= maxT;
+        b.transient = std::sqrt(b.transient); // sqrt spreads medium transients
+    }
+}
+
+uint64_t Deck::getWaveBinCount() const {
+    std::lock_guard<std::mutex> lock(waveMutex);
+    return waveSummary.size();
+}
+
+uint32_t Deck::copyWaveBins(uint64_t start, uint32_t count,
+                            float* outMinMax, uint32_t* outRgba) const {
+    std::lock_guard<std::mutex> lock(waveMutex);
+    if (start >= waveSummary.size()) return 0;
+    uint64_t end = start + count;
+    if (end > waveSummary.size()) end = waveSummary.size();
+    uint32_t n = (uint32_t)(end - start);
+    for (uint32_t i = 0; i < n; ++i) {
+        const WaveBin& bin = waveSummary[start + i];
+        if (outMinMax) {
+            outMinMax[i * 4]     = bin.mn;
+            outMinMax[i * 4 + 1] = bin.mx;
+            outMinMax[i * 4 + 2] = bin.rms;
+            outMinMax[i * 4 + 3] = bin.transient;
+        }
+        if (outRgba) outRgba[i] = bin.rgba;
+    }
+    return n;
 }
 
 void Deck::setSpeed(double s) {

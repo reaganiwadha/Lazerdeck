@@ -119,6 +119,33 @@ void Engine::processCommands() {
                             mixer->getChannel(deckIdx)->setVolume(vol);
                         }
                     }
+                    else if (action == "bpm") {
+                        float value;
+                        if (iss >> value && value > 0.0f) {
+                            decks[deckIdx]->setBpmManual(value);
+                            decks[deckIdx]->saveAnalysis(analysisDB);
+                        }
+                    }
+                    else if (action == "offset") {
+                        float frames;
+                        if (iss >> frames) {
+                            decks[deckIdx]->setBeatOffset(frames);
+                            decks[deckIdx]->saveAnalysis(analysisDB);
+                        }
+                    }
+                    else if (action == "nudge_offset") {
+                        float delta;
+                        if (iss >> delta) {
+                            decks[deckIdx]->nudgeBeatOffset(delta);
+                            decks[deckIdx]->saveAnalysis(analysisDB);
+                        }
+                    }
+                    else if (action == "metronome") {
+                        int on;
+                        if (iss >> on) {
+                            decks[deckIdx]->setMetronome(on != 0);
+                        }
+                    }
                     else if (action == "sync") {
                         int sourceIdx;
                         if (iss >> sourceIdx) {
@@ -183,6 +210,30 @@ void Engine::processCommands() {
             } catch (...) {}
         }
     }
+}
+
+int Engine::getAudioDeviceCount() {
+    return (int)audioEngine.refreshDevices().size();
+}
+
+bool Engine::getAudioDevice(int listIndex, AudioDeviceInfo& out) {
+    return audioEngine.getCachedDevice(listIndex, out);
+}
+
+void Engine::setAudioDevice(int deviceIndex) {
+    // Run the reopen on the engine thread so it's serialized with the rest of
+    // engine state and never races the audio callback.
+    queueTask([this, deviceIndex]() {
+        if (audioEngine.reopen(deviceIndex)) {
+            sampleRate = audioEngine.getActualSampleRate();
+            if (mixer) mixer->setSampleRate(sampleRate);
+            for (auto& d : decks) d->updateSampleRate(sampleRate);
+            Logger::info("Audio device switched; engine now @ " +
+                         std::to_string(sampleRate) + " Hz");
+        } else {
+            Logger::error("Audio device switch failed; keeping previous output");
+        }
+    });
 }
 
 void Engine::queueTask(std::function<void()> task) {

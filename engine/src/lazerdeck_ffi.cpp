@@ -69,6 +69,7 @@ int32_t lazerdeck_get_deck_state(int32_t deck_idx, LazerDeckState* out) {
     out->sync_active   = deck->isSyncActive() ? 1 : 0;
     out->sync_source   = deck->getSyncSource();
     out->sample_rate   = g_engine->getSampleRate();
+    out->metronome_enabled = deck->isMetronomeEnabled() ? 1 : 0;
 
     std::string fp = deck->getCurrentFilepath();
     std::strncpy(out->filepath, fp.c_str(), 511);
@@ -105,4 +106,65 @@ int32_t lazerdeck_pause(int32_t deck_idx) {
 void lazerdeck_push_command(const char* cmd) {
     if (!g_engine || !cmd) return;
     g_engine->pushCommand(std::string(cmd));
+}
+
+int32_t lazerdeck_get_audio_device_count() {
+    if (!g_engine) return 0;
+    return g_engine->getAudioDeviceCount();
+}
+
+int32_t lazerdeck_get_audio_device(int32_t list_index, LazerAudioDevice* out) {
+    if (!g_engine || !out) return 0;
+    AudioDeviceInfo info;
+    if (!g_engine->getAudioDevice(list_index, info)) return 0;
+
+    out->index               = info.index;
+    out->is_default          = info.isDefault ? 1 : 0;
+    out->is_current          = (info.index == g_engine->audio().getCurrentDevice()) ? 1 : 0;
+    out->max_output_channels = info.maxOutputChannels;
+    out->default_sample_rate = (int32_t)info.defaultSampleRate;
+    std::strncpy(out->name, info.name.c_str(), 255);     out->name[255] = '\0';
+    std::strncpy(out->host_api, info.hostApi.c_str(), 63); out->host_api[63] = '\0';
+    return 1;
+}
+
+int32_t lazerdeck_get_audio_config(LazerAudioConfig* out) {
+    if (!g_engine || !out) return 0;
+    AudioEngine& a = g_engine->audio();
+
+    out->device_index  = a.getCurrentDevice();
+    out->sample_rate   = a.getActualSampleRate();
+    out->buffer_frames = a.getBufferSize();
+    out->bit_depth     = a.getBitDepth();
+    out->latency_ms    = a.getLatencyMs();
+
+    std::string name = a.getCurrentDeviceName();
+    std::string host = a.getCurrentHostApi();
+    std::strncpy(out->device_name, name.c_str(), 255); out->device_name[255] = '\0';
+    std::strncpy(out->host_api, host.c_str(), 63);     out->host_api[63] = '\0';
+    return 1;
+}
+
+int32_t lazerdeck_set_audio_device(int32_t device_index) {
+    if (!g_engine) return 0;
+    g_engine->setAudioDevice(device_index);
+    return 1;
+}
+
+int32_t lazerdeck_get_wave_info(int32_t deck_idx, uint64_t* out_bin_count,
+                                uint32_t* out_bin_frames) {
+    if (!g_engine) return 0;
+    Deck* deck = g_engine->getDeck(deck_idx);
+    if (!deck) return 0;
+    if (out_bin_count)  *out_bin_count  = deck->getWaveBinCount();
+    if (out_bin_frames) *out_bin_frames = deck->getWaveBinFrames();
+    return 1;
+}
+
+int32_t lazerdeck_copy_wave_bins(int32_t deck_idx, uint64_t start, uint32_t count,
+                                 float* out_minmax, uint32_t* out_rgba) {
+    if (!g_engine) return 0;
+    Deck* deck = g_engine->getDeck(deck_idx);
+    if (!deck) return 0;
+    return (int32_t)deck->copyWaveBins(start, count, out_minmax, out_rgba);
 }

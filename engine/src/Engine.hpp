@@ -43,6 +43,14 @@ public:
     }
     Lazerdeck::Mixer* getMixer() { return mixer.get(); }
 
+    // --- Audio device management (for the host's settings UI) ---
+    AudioEngine& audio() { return audioEngine; }
+    int  getAudioDeviceCount();                         // refreshes the cache
+    bool getAudioDevice(int listIndex, AudioDeviceInfo& out);
+    // Queues a device switch onto the engine thread; reopens the output stream
+    // on `deviceIndex` without tearing down decks/mixer.
+    void setAudioDevice(int deviceIndex);
+
 private:
     void processCommands();   // drains the LazerScript command queue
     void processTasks();

@@ -1,8 +1,27 @@
 #include "flutter_window.h"
 
+#include <flutter/method_channel.h>
+#include <flutter/standard_method_codec.h>
+
 #include <optional>
+#include <string>
 
 #include "flutter/generated_plugin_registrant.h"
+
+namespace {
+
+// Converts a UTF-8 std::string to a wide string for Win32 SetWindowTextW.
+std::wstring Utf8ToWide(const std::string& utf8) {
+  if (utf8.empty()) return std::wstring();
+  int len = MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(),
+                                static_cast<int>(utf8.size()), nullptr, 0);
+  std::wstring wide(len, L'\0');
+  MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), static_cast<int>(utf8.size()),
+                      wide.data(), len);
+  return wide;
+}
+
+}  // namespace
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
     : project_(project) {}
@@ -26,6 +45,24 @@ bool FlutterWindow::OnCreate() {
   }
   RegisterPlugins(flutter_controller_->engine());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
+
+  // Channel that lets Dart drive the native window title (FPS / debug info).
+  auto title_channel =
+      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+          flutter_controller_->engine()->messenger(), "lazerdeck/window",
+          &flutter::StandardMethodCodec::GetInstance());
+  title_channel->SetMethodCallHandler(
+      [this](const auto& call, auto result) {
+        if (call.method_name() == "setTitle") {
+          if (const auto* title = std::get_if<std::string>(call.arguments())) {
+            SetWindowTextW(GetHandle(), Utf8ToWide(*title).c_str());
+          }
+          result->Success();
+        } else {
+          result->NotImplemented();
+        }
+      });
+  title_channel_ = std::move(title_channel);
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
     this->Show();

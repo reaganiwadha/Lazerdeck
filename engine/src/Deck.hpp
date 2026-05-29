@@ -14,6 +14,16 @@
 #include "AnalysisDB.hpp"
 #include "Trigger.hpp"
 
+// One precomputed waveform bin. Built once during load; the UI reads these
+// directly and never rescans the raw audio buffer per frame.
+struct WaveBin {
+    float    mn;         // min sample in the bin       [-1, 1]
+    float    mx;         // max sample in the bin       [-1, 1]
+    float    rms;        // RMS amplitude               [0, 1]
+    float    transient;  // normalized transient strength [0, 1] after final pass
+    uint32_t rgba;       // 0xAARRGGBB color from FFT energy
+};
+
 class Deck {
 public:
     Deck(int sampleRate = 44100);
@@ -53,13 +63,35 @@ public:
 
     float getBPM() const { return bpm.load(); }
     void setBPM(float b) { bpm.store(b); }
-    
+
+    // Manual BPM override: pins the value and stops auto-analysis from
+    // clobbering it (see analyzeBPMWork). Cleared on the next load().
+    void setBpmManual(float b) {
+        bpm.store(b);
+        bpmManual.store(true);
+        analyzing.store(false);
+    }
+
     float getBeatOffset() const { return beatOffset.load(); }
     void setBeatOffset(float o) { beatOffset.store(o); }
+    void nudgeBeatOffset(float delta) { beatOffset.store(beatOffset.load() + delta); }
 
     bool isAnalyzing() const { return analyzing.load(); }
 
+    // --- Waveform summary (for UI rendering) ---
+    // Number of source frames each WaveBin spans.
+    static constexpr uint32_t kWaveBinFrames = 256;
+    uint32_t getWaveBinFrames() const { return kWaveBinFrames; }
+    // Total bins currently available (grows during load).
+    uint64_t getWaveBinCount() const;
+    // Copies up to `count` bins starting at `start` into the caller's buffers.
+    // outMinMax receives 2 floats per bin (min, max); outRgba receives 1 per
+    // bin. Either may be null. Returns the number of bins actually copied.
+    uint32_t copyWaveBins(uint64_t start, uint32_t count,
+                          float* outMinMax, uint32_t* outRgba) const;
+
         void toggleMetronome() { metronomeEnabled.store(!metronomeEnabled.load()); }
+        void setMetronome(bool on) { metronomeEnabled.store(on); }
 
         bool isMetronomeEnabled() const { return metronomeEnabled.load(); }
 
@@ -112,6 +144,21 @@ public:
 
         void analyzeBPMWork();
 
+        // Appends complete WaveBins covering frames up to `framesAvailable`.
+        // When `finalChunk` is set, also emits a trailing bin for the remainder.
+        void summarizeUpTo(uint64_t framesAvailable, bool finalChunk);
+        WaveBin makeWaveBin(uint64_t startFrame, uint32_t frameCount) const;
+        // Scales all transients to [0,1] and applies sqrt for perceptual spread.
+        // Called once after the loader has emitted the final bin.
+        void normalizeWaveTransients();
+
+        std::vector<WaveBin> waveSummary;
+        mutable std::mutex   waveMutex;
+        // Envelope follower state for transient detection — only touched on the
+        // loader thread, no locking needed.
+        float _waveEnvSlow  = 0.0f;
+        float _wavePrevRms  = 0.0f;
+
     
 
         AudioBuffer buffer;
@@ -147,6 +194,10 @@ public:
         std::atomic<float> beatOffset{0.0f};
 
         std::atomic<bool> analyzing{false};
+
+        // Set when the user overrides BPM by hand; blocks analyzeBPMWork from
+        // overwriting it. Reset on load().
+        std::atomic<bool> bpmManual{false};
 
         std::thread analysisThread;
 

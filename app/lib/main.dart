@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import 'ffi/engine.dart';
 import 'ui/decks_view.dart';
+import 'ui/window_title.dart';
 
 void main() {
   final engine = LazerdeckEngine.load();
@@ -20,14 +21,19 @@ class LazerdeckApp extends StatefulWidget {
 }
 
 class _LazerdeckAppState extends State<LazerdeckApp> with WidgetsBindingObserver {
+  late final WindowTitleMonitor _titleMonitor;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _titleMonitor = WindowTitleMonitor(widget.engine);
+    if (widget.initOk) _titleMonitor.start();
   }
 
   @override
   void dispose() {
+    _titleMonitor.stop();
     WidgetsBinding.instance.removeObserver(this);
     widget.engine.dispose();
     super.dispose();
@@ -45,11 +51,12 @@ class _LazerdeckAppState extends State<LazerdeckApp> with WidgetsBindingObserver
       title: 'Lazerdeck',
       debugShowCheckedModeBanner: false,
       theme: ThemeData.dark(useMaterial3: true).copyWith(
-        scaffoldBackgroundColor: const Color(0xFF0E0E12),
+        scaffoldBackgroundColor: Colors.black,
         colorScheme: const ColorScheme.dark(
-          primary: Color(0xFF00E5FF),
-          secondary: Color(0xFFFF2D95),
-          surface: Color(0xFF1A1A22),
+          primary: Color(0xFFE0344B), // minimal accent: tape-deck REC red
+          secondary: Color(0xFFE0344B),
+          surface: Color(0xFF0A0A0A),
+          surfaceContainerHighest: Color(0xFF141414),
         ),
       ),
       home: widget.initOk ? DecksView(engine: widget.engine) : const _EngineError(),
