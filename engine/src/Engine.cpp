@@ -13,6 +13,7 @@ Engine::Engine() : running(false), sampleRate(44100) {}
 
 Engine::~Engine() {
     stop();
+    shutdown();
 }
 
 bool Engine::init(int numDecks) {
@@ -45,7 +46,7 @@ bool Engine::init(int numDecks) {
 
     // Optional VST3 support: load the separate plugin library if present.
     Lazerdeck::Vst3Runtime::load();
-    std::thread([this]() { scanVSTs(); }).detach();
+    vstScanThread = std::thread([this]() { scanVSTs(); });
 
     Logger::info("Lazerdeck engine ready with " + std::to_string(numDecks) +
                  " decks @ " + std::to_string(sampleRate) + "Hz");
@@ -198,6 +199,7 @@ void Engine::stop() {
 }
 
 void Engine::shutdown() {
+    if (vstScanThread.joinable()) vstScanThread.join();
     if (oscHandler) oscHandler->stop();
     audioEngine.stop();
     if (mixer) {

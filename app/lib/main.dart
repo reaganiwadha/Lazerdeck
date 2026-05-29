@@ -1,3 +1,4 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
 
 import 'ffi/engine.dart';
@@ -9,10 +10,34 @@ void main() {
   runApp(LazerdeckApp(engine: engine, initOk: ok));
 }
 
-class LazerdeckApp extends StatelessWidget {
+class LazerdeckApp extends StatefulWidget {
   final LazerdeckEngine engine;
   final bool initOk;
   const LazerdeckApp({super.key, required this.engine, required this.initOk});
+
+  @override
+  State<LazerdeckApp> createState() => _LazerdeckAppState();
+}
+
+class _LazerdeckAppState extends State<LazerdeckApp> with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    widget.engine.dispose();
+    super.dispose();
+  }
+
+  @override
+  Future<AppExitResponse> didRequestAppExit() async {
+    widget.engine.dispose();
+    return AppExitResponse.exit;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -27,7 +52,7 @@ class LazerdeckApp extends StatelessWidget {
           surface: Color(0xFF1A1A22),
         ),
       ),
-      home: initOk ? DecksView(engine: engine) : const _EngineError(),
+      home: widget.initOk ? DecksView(engine: widget.engine) : const _EngineError(),
     );
   }
 }

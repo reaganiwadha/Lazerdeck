@@ -118,8 +118,12 @@ class LazerdeckEngine {
     return utf8.decode(bytes, allowMalformed: true);
   }
 
+  bool _disposed = false;
+
   void dispose() {
+    if (_disposed) return;
     shutdown();
     calloc.free(_scratch);
+    _disposed = true;
   }
 }

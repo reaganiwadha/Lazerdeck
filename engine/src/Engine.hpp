@@ -5,6 +5,7 @@
 #include "AnalysisDB.hpp"
 #include "Mixer.hpp"
 #include <atomic>
+#include <thread>
 #include <memory>
 #include <vector>
 #include <functional>
@@ -66,6 +67,7 @@ private:
 
     std::vector<std::string> vstPaths;
     std::mutex vstMutex;
+    std::thread vstScanThread;
 
     std::string workingDirectory;
     ThreadSafeQueue<std::string> commandQueue;
