@@ -120,9 +120,12 @@ public:
     void setLoopEnd();
     void setLoopRange(uint64_t start, uint64_t end);
     void exitLoop();
+    void clearLoop();
     bool isLoopActive() const { return loopActive.load(); }
     uint64_t getLoopStart() const { return loopStart.load(); }
     uint64_t getLoopEnd() const { return loopEnd.load(); }
+    uint64_t getRecallStart() const { return recallStart.load(); }
+    uint64_t getRecallEnd() const { return recallEnd.load(); }
 
     // Sync
     void setSync(bool active, int sourceIdx = -1) { 
@@ -263,13 +266,15 @@ public:
 
                     std::atomic<uint64_t> loopEnd{0};
 
-    
+                    std::atomic<uint64_t> recallStart{0};
 
-                
+                    std::atomic<uint64_t> recallEnd{0};
 
-    
 
-                    // Sync
+
+
+
+                        // Sync
 
     
 

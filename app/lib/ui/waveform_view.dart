@@ -198,7 +198,6 @@ class _WavePainter extends CustomPainter {
   _WavePainter(this.m) : super(repaint: m);
 
   static const _bg = Color(0xFF0A0A0A);
-  static const _gridColor = Color(0x33FFFFFF);
   static const _playheadColor = Color(0xFFFF3366);
 
   @override
@@ -317,23 +316,31 @@ class _WavePainter extends CustomPainter {
     final endFrame = m.currentFrame + (size.width - half) * spp;
     final startBeat = ((startFrame - m.beatOffset) / framesPerBeat).floor();
 
-    final line = Paint()
-      ..color = _gridColor
-      ..strokeWidth = 1;
-    final downbeat = Paint()
-      ..color = _gridColor.withValues(alpha: 0.5)
-      ..strokeWidth = 2;
+    // Invert against whatever's behind so the grid is always high-contrast:
+    // bright white over the dark background, dark over loud waveform peaks.
+    // Wide strokes + difference blend make the lines impossible to miss.
+    final beat = Paint()
+      ..blendMode = BlendMode.difference
+      ..color = Colors.white
+      ..strokeWidth = 2.5;
+    final bar = Paint()
+      ..blendMode = BlendMode.difference
+      ..color = Colors.white
+      ..strokeWidth = 5;
+
+    // When zoomed far out, beats collapse into a solid wall — drop the
+    // per-beat lines and keep only the bar (downbeat) lines.
+    final beatPx = framesPerBeat / spp;
+    final drawBeats = beatPx >= 7;
 
     for (var i = startBeat;; i++) {
       final beatFrame = i * framesPerBeat + m.beatOffset;
       if (beatFrame > endFrame) break;
       final x = half + (beatFrame - m.currentFrame) / spp;
-      if (x < -2 || x > size.width + 2) continue;
-      canvas.drawLine(
-        Offset(x, 0),
-        Offset(x, size.height),
-        i % 4 == 0 ? downbeat : line,
-      );
+      if (x < -3 || x > size.width + 3) continue;
+      final isBar = i % 4 == 0;
+      if (!isBar && !drawBeats) continue;
+      canvas.drawLine(Offset(x, 0), Offset(x, size.height), isBar ? bar : beat);
     }
   }
 

@@ -159,7 +159,7 @@ void Deck::analyzeBPMWork() {
         const float* src = buffer.frame(processedFrames);
 
         try {
-             bpmDetector.inputSamples(src, framesToProcess);
+             bpmDetector.inputSamples(src, static_cast<int>(framesToProcess));
         } catch (...) {
              break;
         }
@@ -481,6 +481,38 @@ uint64_t Deck::getFramesAvailable() const {
     return framesAvailable.load(std::memory_order_relaxed);
 }
 
+namespace {
+// MiniMeters-style spectral palette: bass -> red, mids -> warm white, highs ->
+// cyan/blue. `t` is the spectral position in [0,1] (0 = bass, 1 = treble).
+void spectralColor(float t, uint8_t& r, uint8_t& g, uint8_t& b) {
+    struct Stop { float t, r, g, b; };
+    static const Stop stops[] = {
+        {0.00f, 235.f,  40.f,  25.f},  // deep red
+        {0.28f, 255.f, 120.f,  30.f},  // orange
+        {0.48f, 255.f, 235.f, 220.f},  // warm white
+        {0.70f,  70.f, 220.f, 230.f},  // cyan
+        {1.00f,  45.f, 110.f, 255.f},  // blue
+    };
+    if (t < 0.f) t = 0.f;
+    if (t > 1.f) t = 1.f;
+    const int n = (int)(sizeof(stops) / sizeof(stops[0]));
+    for (int i = 1; i < n; ++i) {
+        if (t <= stops[i].t) {
+            const Stop& a = stops[i - 1];
+            const Stop& c = stops[i];
+            float f = (c.t > a.t) ? (t - a.t) / (c.t - a.t) : 0.f;
+            r = (uint8_t)(a.r + (c.r - a.r) * f);
+            g = (uint8_t)(a.g + (c.g - a.g) * f);
+            b = (uint8_t)(a.b + (c.b - a.b) * f);
+            return;
+        }
+    }
+    r = (uint8_t)stops[n - 1].r;
+    g = (uint8_t)stops[n - 1].g;
+    b = (uint8_t)stops[n - 1].b;
+}
+}  // namespace
+
 WaveBin Deck::makeWaveBin(uint64_t startFrame, uint32_t frameCount) const {
     float mn = 1.0f, mx = -1.0f;
     double sumSq = 0.0;
@@ -636,7 +668,7 @@ void Deck::updateVisualFrame() {
         uint64_t now = lzr::nowMs();
         if (lastVisualUpdateTime == 0) {
             lastVisualUpdateTime = now;
-            lastVisualFrame = currentFrame.load();
+            lastVisualFrame = static_cast<double>(currentFrame.load());
             visualFrame.store(lastVisualFrame);
         } else {
             double dt = (now - lastVisualUpdateTime) / 1000.0; // seconds
@@ -647,17 +679,17 @@ void Deck::updateVisualFrame() {
             double interpolated = lastVisualFrame + expectedAdvance;
             
             // Clamp to actual current frame (don't go past what audio has processed)
-            if (interpolated > current) {
-                interpolated = current;
+            if (interpolated > static_cast<double>(current)) {
+                interpolated = static_cast<double>(current);
             }
             
             visualFrame.store(interpolated);
             lastVisualUpdateTime = now;
-            lastVisualFrame = current;
+            lastVisualFrame = static_cast<double>(current);
         }
     } else {
         lastVisualUpdateTime = 0;
-        visualFrame.store(currentFrame.load());
+        visualFrame.store(static_cast<double>(currentFrame.load()));
     }
 }
 
@@ -726,7 +758,28 @@ void Deck::setLoopRange(uint64_t start, uint64_t end) {
 }
 
 void Deck::exitLoop() {
+    uint64_t start = loopStart.load();
+    uint64_t end = loopEnd.load();
+    if (start > 0) {
+        recallStart.store(start);
+        recallEnd.store(end);
+    }
     loopActive.store(false);
-    Logger::info("Loop Exited");
+    Logger::info("Loop Exited (Recalled stored: " + std::to_string(start) + ")");
+}
+
+void Deck::clearLoop() {
+    uint64_t start = loopStart.load();
+    uint64_t end = loopEnd.load();
+    if (start > 0) {
+        recallStart.store(start);
+        recallEnd.store(end);
+    }
+    loopActive.store(false);
+    loopStart.store(0);
+    loopEnd.store(0);
+    std::lock_guard<std::mutex> lock(triggerMutex);
+    triggers.clear();
+    Logger::info("Loop and Cue markers cleared (Recall stored: " + std::to_string(start) + ")");
 }
 

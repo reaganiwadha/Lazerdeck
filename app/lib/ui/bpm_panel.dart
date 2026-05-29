@@ -26,83 +26,115 @@ class BpmPanel extends StatelessWidget {
     final s = state;
     final hasBpm = s?.hasBpm ?? false;
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration: BoxDecoration(
-        color: const Color(0xFF0C0C0C),
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: Colors.white10),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          hasBpm ? _bpmReadout(s!) : _unknownReadout(),
-          const SizedBox(width: 14),
-          _offsetControl(hasBpm ? s! : null),
-          const SizedBox(width: 10),
-          // Metronome toggle.
-          _MiniButton(
-            icon: Icons.av_timer,
-            tooltip: 'Metronome',
-            lit: s?.metronomeEnabled ?? false,
-            onTap: () =>
-                engine.setMetronome(deck, !(s?.metronomeEnabled ?? false)),
-          ),
-          const SizedBox(width: 4),
-          // Manual BPM/offset entry — emphasized when undetermined.
-          _MiniButton(
-            icon: Icons.edit,
-            tooltip: 'Enter BPM & offset',
-            tint: hasBpm ? Colors.white54 : _accent,
-            onTap: () => _editDialog(context),
-          ),
-        ],
-      ),
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        hasBpm ? _bpmReadout(s!) : _unknownReadout(),
+        const SizedBox(width: 14),
+        _pitchControl(s),
+        const SizedBox(width: 12),
+        _offsetControl(hasBpm ? s! : null),
+        const SizedBox(width: 10),
+        // Metronome toggle.
+        _MiniButton(
+          icon: Icons.av_timer,
+          tooltip: 'Metronome',
+          lit: s?.metronomeEnabled ?? false,
+          onTap: () =>
+              engine.setMetronome(deck, !(s?.metronomeEnabled ?? false)),
+        ),
+        const SizedBox(width: 4),
+        // Manual BPM/offset entry — emphasized when undetermined.
+        _MiniButton(
+          icon: Icons.edit,
+          tooltip: 'Enter BPM & offset',
+          tint: hasBpm ? Colors.white54 : _accent,
+          onTap: () => _editDialog(context),
+        ),
+      ],
     );
   }
 
   Widget _bpmReadout(DeckState s) {
-    final pct = s.speedPercent;
-    final sign = pct >= 0 ? '+' : '−';
-    final pctStr = '$sign${pct.abs().toStringAsFixed(1)}%';
-    final adjusted = s.speed != 1.0;
+    const orange = Color(0xFFFF9500);
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Effective (heard) BPM, large.
         Row(
           crossAxisAlignment: CrossAxisAlignment.baseline,
           textBaseline: TextBaseline.alphabetic,
           children: [
             Text(
-              s.effectiveBpm.toStringAsFixed(1),
-              style: TextStyle(
+              '${s.bpm.toStringAsFixed(1)}/${s.effectiveBpm.toStringAsFixed(1)}',
+              style: const TextStyle(
                 fontSize: 22,
                 height: 1.0,
-                fontWeight: FontWeight.w600,
-                color: adjusted ? _accent : Colors.white,
+                fontFamily: 'ENFONIX',
+                color: orange,
               ),
             ),
             const SizedBox(width: 3),
-            const Text('BPM',
-                style: TextStyle(fontSize: 10, color: Colors.white38)),
-          ],
-        ),
-        const SizedBox(height: 2),
-        // Track BPM + pitch percentage.
-        Row(
-          children: [
-            Text('track ${s.bpm.toStringAsFixed(1)}',
-                style: const TextStyle(fontSize: 10, color: Colors.white54)),
-            const SizedBox(width: 6),
-            Text(
-              pctStr,
+            const Text(
+              'BPM',
               style: TextStyle(
                 fontSize: 10,
-                fontWeight: FontWeight.w600,
-                color: adjusted ? _accent : Colors.white38,
+                color: Colors.white38,
               ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _pitchControl(DeckState? s) {
+    final pct = s?.speedPercent ?? 0.0;
+    final adjusted = (s?.speed ?? 1.0) != 1.0;
+    final sign = pct >= 0 ? '+' : '−';
+    final pctStr = '$sign${pct.abs().toStringAsFixed(1)}%';
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        const Text('PITCH',
+            style: TextStyle(
+                fontSize: 8, letterSpacing: 1.5, color: Colors.white38)),
+        const SizedBox(height: 1),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _MiniButton(
+              icon: Icons.remove,
+              tooltip: 'Slower (−1 BPM)',
+              size: 24,
+              onTap: () => engine.speedDown(deck),
+            ),
+            // Tap the percentage to reset tempo to 0%.
+            Tooltip(
+              message: 'Reset tempo',
+              child: InkWell(
+                borderRadius: BorderRadius.circular(4),
+                onTap: () => engine.resetSpeed(deck),
+                child: SizedBox(
+                  width: 52,
+                  child: Text(
+                    pctStr,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      fontFamily: 'monospace',
+                      color: adjusted ? _accent : Colors.white60,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            _MiniButton(
+              icon: Icons.add,
+              tooltip: 'Faster (+1 BPM)',
+              size: 24,
+              onTap: () => engine.speedUp(deck),
             ),
           ],
         ),

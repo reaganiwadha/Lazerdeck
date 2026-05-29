@@ -113,6 +113,15 @@ void Engine::processCommands() {
                             decks[deckIdx]->setSpeed(speed);
                         }
                     }
+                    else if (action == "speed_up") {
+                        decks[deckIdx]->increaseSpeed();
+                    }
+                    else if (action == "speed_down") {
+                        decks[deckIdx]->decreaseSpeed();
+                    }
+                    else if (action == "speed_reset") {
+                        decks[deckIdx]->setSpeed(1.0);
+                    }
                     else if (action == "volume") {
                         float vol;
                         if (iss >> vol && mixer) {
@@ -170,8 +179,35 @@ void Engine::processCommands() {
                             }
                         }
                     }
+                    else if (action == "loop_in") {
+                        decks[deckIdx]->setLoopStart();
+                    }
+                    else if (action == "loop_out") {
+                        decks[deckIdx]->setLoopEnd();
+                    }
                     else if (action == "loop_exit") {
                         decks[deckIdx]->exitLoop();
+                    }
+                    else if (action == "loop_clear") {
+                        decks[deckIdx]->clearLoop();
+                    }
+                    else if (action == "reloop") {
+                        uint64_t start = decks[deckIdx]->getLoopStart();
+                        uint64_t end = decks[deckIdx]->getLoopEnd();
+                        
+                        // Use recall points if current loop points are empty
+                        if (start == 0) {
+                            start = decks[deckIdx]->getRecallStart();
+                            end = decks[deckIdx]->getRecallEnd();
+                        }
+
+                        if (start > 0) {
+                            decks[deckIdx]->setFrame(start);
+                            if (end > start) {
+                                decks[deckIdx]->setLoopRange(start, end);
+                            }
+                            decks[deckIdx]->play();
+                        }
                     }
                     else if (action == "cue") {
                         int id;

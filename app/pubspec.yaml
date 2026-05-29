@@ -89,3 +89,15 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+  fonts:
+    - family: ENFONIX
+      fonts:
+        - asset: assets/fonts/enfonix.otf
+    - family: advercase
+      fonts:
+        - asset: assets/fonts/advercase-regular.otf
+        - asset: assets/fonts/advercase-bold.otf
+          weight: 700
+    - family: bitroad
+      fonts:
+        - asset: assets/fonts/bitroad.otf

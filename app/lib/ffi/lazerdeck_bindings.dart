@@ -30,6 +30,10 @@ final class LazerDeckState extends ffi.Struct {
   external int loopStart;
   @ffi.Uint64()
   external int loopEnd;
+  @ffi.Uint64()
+  external int recallStart;
+  @ffi.Uint64()
+  external int recallEnd;
   @ffi.Int32()
   external int syncActive;
   @ffi.Int32()

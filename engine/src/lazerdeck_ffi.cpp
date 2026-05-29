@@ -66,6 +66,8 @@ int32_t lazerdeck_get_deck_state(int32_t deck_idx, LazerDeckState* out) {
     out->current_frame = deck->getCurrentFrame();
     out->loop_start    = deck->getLoopStart();
     out->loop_end      = deck->getLoopEnd();
+    out->recall_start  = deck->getRecallStart();
+    out->recall_end    = deck->getRecallEnd();
     out->sync_active   = deck->isSyncActive() ? 1 : 0;
     out->sync_source   = deck->getSyncSource();
     out->sample_rate   = g_engine->getSampleRate();

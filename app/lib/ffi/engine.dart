@@ -19,6 +19,11 @@ class DeckState {
   final int currentFrame;
   final int sampleRate;
   final bool metronomeEnabled;
+  final bool loopActive;
+  final int loopStart;
+  final int loopEnd;
+  final int recallStart;
+  final int recallEnd;
   final String filepath;
 
   const DeckState({
@@ -32,8 +37,16 @@ class DeckState {
     required this.currentFrame,
     required this.sampleRate,
     required this.metronomeEnabled,
+    required this.loopActive,
+    required this.loopStart,
+    required this.loopEnd,
+    required this.recallStart,
+    required this.recallEnd,
     required this.filepath,
   });
+
+  bool get hasCue => loopStart > 0;
+  bool get hasRecall => recallStart > 0;
 
   Duration get position => sampleRate > 0
       ? Duration(milliseconds: (currentFrame * 1000) ~/ sampleRate)
@@ -52,6 +65,24 @@ class DeckState {
 
   /// Beat-grid offset expressed in milliseconds.
   double get offsetMs => sampleRate > 0 ? beatOffset / sampleRate * 1000.0 : 0;
+
+  double get _framesPerBeat => bpm > 0 ? sampleRate * 60.0 / bpm : 0;
+
+  /// Absolute beat index from the grid origin (0-based, can be negative before
+  /// the first beat). 0 when BPM is unknown.
+  double get beatPosition {
+    final fpb = _framesPerBeat;
+    return fpb > 0 ? (currentFrame - beatOffset) / fpb : 0;
+  }
+
+  /// 1-based bar number (4/4 assumed).
+  int get bar => (beatPosition.floor() / 4).floor() + 1;
+
+  /// 1-based beat within the current bar (1..4).
+  int get beatInBar => (beatPosition.floor() % 4 + 4) % 4 + 1;
+
+  /// Bar.beat counter, Rekordbox-style; "—.—" when BPM is unknown.
+  String get barBeat => hasBpm ? '$bar.$beatInBar' : '—.—';
 }
 
 /// Host-side cache of one deck's precomputed waveform summary.
@@ -192,6 +223,18 @@ class LazerdeckEngine {
   void setMetronome(int deck, bool on) =>
       pushCommand('${_d(deck)} metronome ${on ? 1 : 0}');
 
+  /// Nudge tempo up/down by ~1 BPM (engine-clamped), or reset to 0% (1.0x).
+  void speedUp(int deck) => pushCommand('${_d(deck)} speed_up');
+  void speedDown(int deck) => pushCommand('${_d(deck)} speed_down');
+  void resetSpeed(int deck) => pushCommand('${_d(deck)} speed_reset');
+
+  /// Loop in-point (A), out-point (B, activates the loop), and exit.
+  void loopIn(int deck) => pushCommand('${_d(deck)} loop_in');
+  void loopOut(int deck) => pushCommand('${_d(deck)} loop_out');
+  void exitLoop(int deck) => pushCommand('${_d(deck)} loop_exit');
+  void clearLoop(int deck) => pushCommand('${_d(deck)} loop_clear');
+  void reloop(int deck) => pushCommand('${_d(deck)} reloop');
+
   void pushCommand(String cmd) {
     final p = cmd.toNativeUtf8();
     try {
@@ -217,6 +260,11 @@ class LazerdeckEngine {
       currentFrame: s.currentFrame,
       sampleRate: s.sampleRate,
       metronomeEnabled: s.metronomeEnabled != 0,
+      loopActive: s.loopActive != 0,
+      loopStart: s.loopStart,
+      loopEnd: s.loopEnd,
+      recallStart: s.recallStart,
+      recallEnd: s.recallEnd,
       filepath: _readFilepath(s),
     );
   }
