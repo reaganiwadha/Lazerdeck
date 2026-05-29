@@ -70,7 +70,7 @@ class BpmPanel extends StatelessWidget {
               style: const TextStyle(
                 fontSize: 22,
                 height: 1.0,
-                fontFamily: 'ENFONIX',
+                fontFamily: 'bitroad',
                 color: orange,
               ),
             ),
