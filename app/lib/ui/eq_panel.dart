@@ -1,57 +1,127 @@
-// Per-deck 3-band channel EQ: three small knobs (HI / MID / LOW) that send
-// DJM-style EQ commands to the engine. Each knob is 0..1 with center = unity.
+// Per-deck channel controls shown beside the waveform, at the same height.
+// No boxes/cards/outlines — just the controls floating on the background:
+//   - MixerBox: 3-band isolator EQ stacked vertically (HI / MID / LOW) plus a
+//     channel volume fader. EQ + volume are bound to the engine.
+//   - FxBox: three placeholder FX knobs (not yet wired to the engine).
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
 import '../ffi/engine.dart';
 
-const _kCenter = 0.5; // unity / 0 dB
+const _kCenter = 0.5; // EQ unity / 0 dB
+const _accent = Color(0xFFE0344B);
 
-class EqPanel extends StatefulWidget {
-  final LazerdeckEngine engine;
-  final int deck;
-  const EqPanel({super.key, required this.engine, required this.deck});
+const _labelStyle = TextStyle(
+  fontSize: 9,
+  fontFamily: 'bitroad',
+  letterSpacing: 1,
+  fontWeight: FontWeight.w600,
+  color: Colors.white38,
+);
+
+/// Three placeholder FX knobs (FX1/FX2/FX3). Not wired to the engine yet —
+/// they just turn so the layout is in place for future per-channel effects.
+class FxBox extends StatefulWidget {
+  const FxBox({super.key});
 
   @override
-  State<EqPanel> createState() => _EqPanelState();
+  State<FxBox> createState() => _FxBoxState();
 }
 
-class _EqPanelState extends State<EqPanel> {
-  double _hi = _kCenter;
-  double _mid = _kCenter;
-  double _low = _kCenter;
+class _FxBoxState extends State<FxBox> {
+  double _a = _kCenter;
+  double _b = _kCenter;
+  double _c = _kCenter;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        _EqKnob(
-          label: 'HI',
-          value: _hi,
-          onChanged: (v) {
-            setState(() => _hi = v);
-            widget.engine.setEqHigh(widget.deck, v);
-          },
-        ),
-        _EqKnob(
-          label: 'MID',
-          value: _mid,
-          onChanged: (v) {
-            setState(() => _mid = v);
-            widget.engine.setEqMid(widget.deck, v);
-          },
-        ),
-        _EqKnob(
-          label: 'LOW',
-          value: _low,
-          onChanged: (v) {
-            setState(() => _low = v);
-            widget.engine.setEqLow(widget.deck, v);
-          },
-        ),
-      ],
+    return SizedBox(
+      width: 56,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          _EqKnob(
+            label: 'FX1',
+            value: _a,
+            onChanged: (v) => setState(() => _a = v),
+          ),
+          _EqKnob(
+            label: 'FX2',
+            value: _b,
+            onChanged: (v) => setState(() => _b = v),
+          ),
+          _EqKnob(
+            label: 'FX3',
+            value: _c,
+            onChanged: (v) => setState(() => _c = v),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Channel mixer: vertical HI/MID/LOW isolator EQ + volume fader.
+class MixerBox extends StatefulWidget {
+  final LazerdeckEngine engine;
+  final int deck;
+  const MixerBox({super.key, required this.engine, required this.deck});
+
+  @override
+  State<MixerBox> createState() => _MixerBoxState();
+}
+
+class _MixerBoxState extends State<MixerBox> {
+  double _hi = _kCenter;
+  double _mid = _kCenter;
+  double _low = _kCenter;
+  double _vol = 1.0;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 64,
+      child: Column(
+        children: [
+          _EqKnob(
+            label: 'HI',
+            value: _hi,
+            onChanged: (v) {
+              setState(() => _hi = v);
+              widget.engine.setEqHigh(widget.deck, v);
+            },
+          ),
+          _EqKnob(
+            label: 'MID',
+            value: _mid,
+            onChanged: (v) {
+              setState(() => _mid = v);
+              widget.engine.setEqMid(widget.deck, v);
+            },
+          ),
+          _EqKnob(
+            label: 'LOW',
+            value: _low,
+            onChanged: (v) {
+              setState(() => _low = v);
+              widget.engine.setEqLow(widget.deck, v);
+            },
+          ),
+          const SizedBox(height: 10),
+          Expanded(
+            child: _VolumeFader(
+              value: _vol,
+              onChanged: (v) {
+                setState(() => _vol = v);
+                widget.engine.setVolume(widget.deck, v);
+              },
+            ),
+          ),
+          const SizedBox(height: 4),
+          const Text('VOL', style: _labelStyle),
+        ],
+      ),
     );
   }
 }
@@ -74,7 +144,7 @@ class _EqKnob extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4),
+      padding: const EdgeInsets.symmetric(vertical: 3),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -86,22 +156,13 @@ class _EqKnob extends StatelessWidget {
               if (next != value) onChanged(next);
             },
             child: SizedBox(
-              width: 38,
-              height: 38,
+              width: 36,
+              height: 36,
               child: CustomPaint(painter: _KnobPainter(value)),
             ),
           ),
           const SizedBox(height: 2),
-          Text(
-            label,
-            style: const TextStyle(
-              fontSize: 9,
-              fontFamily: 'bitroad',
-              letterSpacing: 1,
-              fontWeight: FontWeight.w600,
-              color: Colors.white38,
-            ),
-          ),
+          Text(label, style: _labelStyle),
         ],
       ),
     );
@@ -112,9 +173,7 @@ class _KnobPainter extends CustomPainter {
   final double value; // 0..1
   _KnobPainter(this.value);
 
-  static const _accent = Color(0xFFE0344B);
-
-  // Sweep from 7 o'clock to 5 o'clock (300° total), leaving a gap at the bottom.
+  // Sweep from 7 o'clock to 5 o'clock (270°), leaving a gap at the bottom.
   static const _startAngle = math.pi * 0.75; // 135°
   static const _sweep = math.pi * 1.5; // 270°
 
@@ -123,7 +182,6 @@ class _KnobPainter extends CustomPainter {
     final center = size.center(Offset.zero);
     final r = size.width / 2 - 3;
 
-    // Track.
     final track = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = 3
@@ -137,8 +195,8 @@ class _KnobPainter extends CustomPainter {
       track,
     );
 
-    // Active fill from center (unity) toward the current value, so cuts and
-    // boosts read as opposite-direction arcs from the 12 o'clock midpoint.
+    // Active fill from the unity midpoint toward the current value, so cuts and
+    // boosts read as opposite-direction arcs from 12 o'clock.
     final mid = _startAngle + _sweep * _kCenter;
     final cur = _startAngle + _sweep * value;
     final fill = Paint()
@@ -169,4 +227,81 @@ class _KnobPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_KnobPainter old) => old.value != value;
+}
+
+/// A vertical channel fader (0 at bottom .. 1 at top). Drag or tap to set;
+/// double-tap to reset to unity.
+class _VolumeFader extends StatelessWidget {
+  final double value; // 0..1
+  final ValueChanged<double> onChanged;
+  const _VolumeFader({required this.value, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, c) {
+        final h = c.maxHeight;
+        void set(Offset p) {
+          if (h <= 0) return;
+          onChanged((1 - p.dy / h).clamp(0.0, 1.0));
+        }
+
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onPanDown: (d) => set(d.localPosition),
+          onPanUpdate: (d) => set(d.localPosition),
+          onDoubleTap: () => onChanged(1.0),
+          child: CustomPaint(
+            size: const Size(double.infinity, double.infinity),
+            painter: _FaderPainter(value),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _FaderPainter extends CustomPainter {
+  final double value; // 0..1
+  _FaderPainter(this.value);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final cx = size.width / 2;
+    const pad = 6.0;
+    final top = pad;
+    final bot = size.height - pad;
+    final y = bot - value * (bot - top);
+
+    // Track.
+    canvas.drawLine(
+      Offset(cx, top),
+      Offset(cx, bot),
+      Paint()
+        ..color = Colors.white12
+        ..strokeWidth = 4
+        ..strokeCap = StrokeCap.round,
+    );
+    // Filled portion below the handle.
+    canvas.drawLine(
+      Offset(cx, y),
+      Offset(cx, bot),
+      Paint()
+        ..color = _accent
+        ..strokeWidth = 4
+        ..strokeCap = StrokeCap.round,
+    );
+    // Handle bar.
+    final hw = size.width * 0.4;
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromCenter(center: Offset(cx, y), width: hw * 2, height: 8),
+        const Radius.circular(3),
+      ),
+      Paint()..color = Colors.white70,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_FaderPainter old) => old.value != value;
 }

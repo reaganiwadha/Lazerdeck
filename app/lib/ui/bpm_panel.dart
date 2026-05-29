@@ -1,7 +1,8 @@
-// Per-deck BPM / beat-grid / metronome controls. Shows track BPM, the
-// speed-adjusted ("effective") BPM, and a Rekordbox-style pitch percentage.
-// When BPM is unknown it shows "???" with an emphasized pencil to enter it by
-// hand. Offset can be nudged +/- and the metronome toggled per deck.
+// Per-deck BPM controls, split into two pieces so they can live in different
+// bars: [BpmReadout] is the tempo text (shown in the title bar), and
+// [BpmControls] is the pitch nudge / offset nudge / metronome / edit cluster
+// (shown in the transport bar). Manual BPM/offset entry and "delete from DB &
+// re-analyze" live in the edit dialog.
 import 'package:flutter/material.dart';
 
 import '../ffi/engine.dart';
@@ -9,12 +10,83 @@ import '../ffi/engine.dart';
 const _accent = Color(0xFFE0344B);
 const double _offsetNudgeMs = 5.0;
 
-class BpmPanel extends StatelessWidget {
+/// Tempo readout: speed-adjusted ("effective") BPM over the track BPM, or a
+/// "???" prompt when the tempo is unknown.
+class BpmReadout extends StatelessWidget {
+  final DeckState? state;
+  const BpmReadout({super.key, required this.state});
+
+  @override
+  Widget build(BuildContext context) {
+    final s = state;
+    final hasBpm = s?.hasBpm ?? false;
+    return SizedBox(
+      width: 168,
+      child: hasBpm ? _bpmReadout(s!) : _unknownReadout(),
+    );
+  }
+
+  Widget _bpmReadout(DeckState s) {
+    const orange = Color(0xFFFF9500);
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.baseline,
+          textBaseline: TextBaseline.alphabetic,
+          children: [
+            Text(
+              '${s.effectiveBpm.toStringAsFixed(1)}/${s.bpm.toStringAsFixed(1)}',
+              style: const TextStyle(
+                fontSize: 24,
+                height: 1.0,
+                fontFamily: 'bitroad',
+                color: orange,
+              ),
+            ),
+            const SizedBox(width: 4),
+            const Text(
+              'BPM',
+              style: TextStyle(
+                fontSize: 11,
+                fontFamily: 'bitroad',
+                color: Colors.white38,
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _unknownReadout() {
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: const [
+        Text('???  BPM',
+            style: TextStyle(
+                fontSize: 22,
+                fontFamily: 'bitroad',
+                fontWeight: FontWeight.w600,
+                color: Colors.white38)),
+        SizedBox(height: 2),
+        Text('tap ✎ to set tempo',
+            style: TextStyle(
+                fontSize: 10, fontFamily: 'bitroad', color: _accent)),
+      ],
+    );
+  }
+}
+
+/// Tempo controls: pitch nudge, beat-offset nudge, metronome, and manual edit.
+class BpmControls extends StatelessWidget {
   final LazerdeckEngine engine;
   final int deck;
   final DeckState? state;
 
-  const BpmPanel({
+  const BpmControls({
     super.key,
     required this.engine,
     required this.deck,
@@ -29,11 +101,6 @@ class BpmPanel extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        SizedBox(
-          width: 160,
-          child: hasBpm ? _bpmReadout(s!) : _unknownReadout(),
-        ),
-        const SizedBox(width: 4),
         _pitchControl(s),
         const SizedBox(width: 8),
         _offsetControl(hasBpm ? s! : null),
@@ -60,40 +127,6 @@ class BpmPanel extends StatelessWidget {
     );
   }
 
-  Widget _bpmReadout(DeckState s) {
-    const orange = Color(0xFFFF9500);
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.baseline,
-          textBaseline: TextBaseline.alphabetic,
-          children: [
-            Text(
-              '${s.effectiveBpm.toStringAsFixed(1)}/${s.bpm.toStringAsFixed(1)}',
-              style: const TextStyle(
-                fontSize: 22,
-                height: 1.0,
-                fontFamily: 'bitroad',
-                color: orange,
-              ),
-            ),
-            const SizedBox(width: 3),
-            const Text(
-              'BPM',
-              style: TextStyle(
-                fontSize: 10,
-                fontFamily: 'bitroad',
-                color: Colors.white38,
-              ),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-
   Widget _pitchControl(DeckState? s) {
     final pct = s?.speedPercent ?? 0.0;
     final adjusted = (s?.speed ?? 1.0) != 1.0;
@@ -103,11 +136,11 @@ class BpmPanel extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         _MiniButton(
-          child: _hybridIcon(Icons.remove, Icons.access_time),
           tooltip: 'Slower (−1 BPM)',
           size: 24,
           noBorder: true,
           onTap: () => engine.speedDown(deck),
+          child: _hybridIcon(Icons.remove, Icons.access_time),
         ),
         // Tap the percentage to reset tempo to 0%, or drag to adjust.
         Tooltip(
@@ -138,31 +171,12 @@ class BpmPanel extends StatelessWidget {
           ),
         ),
         _MiniButton(
-          child: _hybridIcon(Icons.add, Icons.access_time),
           tooltip: 'Faster (+1 BPM)',
           size: 24,
           noBorder: true,
           onTap: () => engine.speedUp(deck),
+          child: _hybridIcon(Icons.add, Icons.access_time),
         ),
-      ],
-    );
-  }
-
-  Widget _unknownReadout() {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: const [
-        Text('???  BPM',
-            style: TextStyle(
-                fontSize: 20,
-                fontFamily: 'bitroad',
-                fontWeight: FontWeight.w600,
-                color: Colors.white38)),
-        SizedBox(height: 2),
-        Text('tap ✎ to set tempo',
-            style: TextStyle(
-                fontSize: 10, fontFamily: 'bitroad', color: _accent)),
       ],
     );
   }
@@ -175,11 +189,11 @@ class BpmPanel extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         _MiniButton(
-          child: _hybridIcon(Icons.remove, Icons.music_note),
           tooltip: '−${_offsetNudgeMs.toStringAsFixed(0)} ms',
           size: 24,
           noBorder: true,
           onTap: () => engine.nudgeBeatOffsetMs(deck, -_offsetNudgeMs),
+          child: _hybridIcon(Icons.remove, Icons.music_note),
         ),
         SizedBox(
           width: 56,
@@ -191,11 +205,11 @@ class BpmPanel extends StatelessWidget {
           ),
         ),
         _MiniButton(
-          child: _hybridIcon(Icons.add, Icons.music_note),
           tooltip: '+${_offsetNudgeMs.toStringAsFixed(0)} ms',
           size: 24,
           noBorder: true,
           onTap: () => engine.nudgeBeatOffsetMs(deck, _offsetNudgeMs),
+          child: _hybridIcon(Icons.add, Icons.music_note),
         ),
       ],
     );

@@ -76,31 +76,10 @@ class _DecksViewState extends State<DecksView> {
                   ],
                 ),
               ),
-              // Signal routing diagram down the right edge, with each deck's
-              // 3-band EQ knobs overlaid at the top of its slice.
+              // Signal routing diagram down the right edge.
               SizedBox(
-                width: 150,
-                child: Stack(
-                  children: [
-                    Positioned.fill(
-                      child: _RoutingDiagram(deckCount: count, states: _states),
-                    ),
-                    Column(
-                      children: [
-                        for (var i = 0; i < count; i++)
-                          Expanded(
-                            child: Align(
-                              alignment: Alignment.topCenter,
-                              child: Padding(
-                                padding: const EdgeInsets.only(top: 10),
-                                child: EqPanel(engine: widget.engine, deck: i),
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ],
-                ),
+                width: 132,
+                child: _RoutingDiagram(deckCount: count, states: _states),
               ),
             ],
           ),
@@ -161,143 +140,182 @@ class _DeckPanel extends StatelessWidget {
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(0, 6, 8, 6),
-      child: Column(
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Edge-to-edge waveform, thin framed like the old SDL view, with the
-          // "Deck A/B" label overlaid in the top-left corner.
+          // Title bar, waveform, and transport bar all share the waveform's
+          // width. Only the FX and mixer columns sit outside it (to the right).
           Expanded(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                border: Border.all(
-                  color: playing ? const Color(0x55E0344B) : Colors.white12,
-                ),
-              ),
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  WaveformView(engine: engine, deck: index),
-                  Positioned(
-                    top: 6,
-                    left: 10,
-                    child: StrokedText(
-                      'Deck $letter',
-                      fontSize: 17,
-                      fontFamily: 'bitroad',
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 1,
-                      strokeWidth: 3,
-                    ),
-                  ),
-                  Positioned(
-                    top: 6,
-                    left: 0,
-                    right: 0,
-                    child: Center(
-                      child: AnalyzeOverlay(
-                        isAnalyzing: s?.isAnalyzing ?? false,
-                        hasBpm: s?.hasBpm ?? false,
-                        trackId: s?.filepath ?? '',
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          SizedBox(
-            height: 64,
-            child: Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // Cover art + title/artist — tap to load a track. The text
-                // block auto-shrinks to fit the available width.
-                Expanded(
-                  child: InkWell(
-                    onTap: onOpen,
-                    borderRadius: BorderRadius.circular(6),
-                    child: Padding(
-                      padding:
-                          const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      child: DeckTrackHeader(
-                        path: hasTrack ? s.filepath : null,
-                        fallbackName: hasTrack ? _basename(s.filepath) : '',
-                        coverSize: 54,
+                // Title bar: cover art + title/artist, tempo readout, and the
+                // bar.beat + timecode position. Tap the cover/title to load.
+                SizedBox(
+                  height: 84,
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: InkWell(
+                          onTap: onOpen,
+                          borderRadius: BorderRadius.circular(6),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 6),
+                            child: DeckTrackHeader(
+                              path: hasTrack ? s.filepath : null,
+                              fallbackName:
+                                  hasTrack ? _basename(s.filepath) : '',
+                              coverSize: 72,
+                            ),
+                          ),
+                        ),
                       ),
+                      const SizedBox(width: 16),
+                      BpmReadout(state: s),
+                      const SizedBox(width: 16),
+                      _positionReadout(s, playing),
+                      const SizedBox(width: 4),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
+                // Edge-to-edge waveform, thin framed like the old SDL view, with
+                // the "Deck A/B" label overlaid in the top-left corner.
+                Expanded(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      border: Border.all(
+                        color:
+                            playing ? const Color(0x55E0344B) : Colors.white12,
+                      ),
+                    ),
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        WaveformView(engine: engine, deck: index),
+                        Positioned(
+                          top: 6,
+                          left: 10,
+                          child: StrokedText(
+                            'Deck $letter',
+                            fontSize: 17,
+                            fontFamily: 'bitroad',
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 1,
+                            strokeWidth: 3,
+                          ),
+                        ),
+                        Positioned(
+                          top: 6,
+                          left: 0,
+                          right: 0,
+                          child: Center(
+                            child: AnalyzeOverlay(
+                              isAnalyzing: s?.isAnalyzing ?? false,
+                              hasBpm: s?.hasBpm ?? false,
+                              trackId: s?.filepath ?? '',
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
-                const SizedBox(width: 16),
-                _TransportBar(
-                  isPlaying: playing,
-                  onRec: onOpen,
-                  onRew: () => _cmd('seek -4'),
-                  onPlay: () => engine.play(index),
-                  onFfwd: () => _cmd('seek 4'),
-                  onStop: () => _cmd('stop'),
-                  onPause: () => engine.pause(index),
-                ),
-                const SizedBox(width: 12),
-                _LoopBar(
-                  state: s,
-                  onRecall: () => engine.reloop(index),
-                  onA: () => engine.loopIn(index),
-                  onB: () => engine.loopOut(index),
-                  onExit: () => engine.clearLoop(index),
-                ),
-                const SizedBox(width: 14),
-                BpmPanel(engine: engine, deck: index, state: s),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Align(
-                    alignment: Alignment.centerRight,
-                    child: Padding(
-                      padding: const EdgeInsets.only(right: 4),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          SizedBox(
-                            width: 140,
-                            child: Text(
-                              s?.barBeat ?? '—.—',
-                              textAlign: TextAlign.right,
-                              style: TextStyle(
-                                fontSize: 26,
-                                height: 1.0,
-                                fontFamily: 'bitroad',
-                                fontWeight: FontWeight.w600,
-                                letterSpacing: 1,
-                                color: playing
-                                    ? const Color(0xFFE0344B)
-                                    : Colors.white,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          SizedBox(
-                            width: 140,
-                            child: Text(
-                              _timecode(s?.position ?? Duration.zero),
-                              textAlign: TextAlign.right,
-                              style: const TextStyle(
-                                fontSize: 14,
-                                fontFamily: 'bitroad',
-                                letterSpacing: 1,
-                                color: Colors.white38,
-                              ),
-                            ),
-                          ),
-                        ],
+                const SizedBox(height: 8),
+                // Transport bar, centered: playback, loop, tempo controls.
+                SizedBox(
+                  height: 56,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      _TransportBar(
+                        isPlaying: playing,
+                        onRec: onOpen,
+                        onRew: () => _cmd('seek -4'),
+                        onPlay: () => engine.play(index),
+                        onFfwd: () => _cmd('seek 4'),
+                        onStop: () => _cmd('stop'),
+                        onPause: () => engine.pause(index),
                       ),
-                    ),
+                      const SizedBox(width: 12),
+                      _LoopBar(
+                        state: s,
+                        onRecall: () => engine.reloop(index),
+                        onA: () => engine.loopIn(index),
+                        onB: () => engine.loopOut(index),
+                        onExit: () => engine.clearLoop(index),
+                      ),
+                      const SizedBox(width: 14),
+                      BpmControls(engine: engine, deck: index, state: s),
+                    ],
                   ),
                 ),
               ],
             ),
           ),
+          const SizedBox(width: 8),
+          // EQ + FX, vertically bounded to the waveform: the spacers match the
+          // title bar (84 + 8) above and the transport bar (8 + 56) below, so
+          // this column's Expanded lines up exactly with the waveform's.
+          Column(
+            children: [
+              const SizedBox(height: 92),
+              Expanded(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    MixerBox(engine: engine, deck: index),
+                    const SizedBox(width: 8),
+                    const FxBox(),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 64),
+            ],
+          ),
         ],
       ),
+    );
+  }
+
+  // bar.beat counter over the elapsed timecode, right-aligned. Lives in the
+  // title bar.
+  Widget _positionReadout(DeckState? s, bool playing) {
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        SizedBox(
+          width: 140,
+          child: Text(
+            s?.barBeat ?? '—.—',
+            textAlign: TextAlign.right,
+            style: TextStyle(
+              fontSize: 26,
+              height: 1.0,
+              fontFamily: 'bitroad',
+              fontWeight: FontWeight.w600,
+              letterSpacing: 1,
+              color: playing ? const Color(0xFFE0344B) : Colors.white,
+            ),
+          ),
+        ),
+        const SizedBox(height: 2),
+        SizedBox(
+          width: 140,
+          child: Text(
+            _timecode(s?.position ?? Duration.zero),
+            textAlign: TextAlign.right,
+            style: const TextStyle(
+              fontSize: 14,
+              fontFamily: 'bitroad',
+              letterSpacing: 1,
+              color: Colors.white38,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

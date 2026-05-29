@@ -233,6 +233,10 @@ class LazerdeckEngine {
   void setSpeed(int deck, double speed) =>
       pushCommand('${_d(deck)} speed $speed');
 
+  /// Channel volume (linear gain, 0..1).
+  void setVolume(int deck, double value) =>
+      pushCommand('${_d(deck)} volume $value');
+
   /// 3-band channel EQ. [value] is 0..1 with 0.5 = unity (0 dB), 1.0 = +6 dB,
   /// 0.0 = full kill — a DJM-style curve handled engine-side.
   void setEqLow(int deck, double value) =>
