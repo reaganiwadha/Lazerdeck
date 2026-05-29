@@ -5,7 +5,7 @@
 
 namespace Lazerdeck {
 
-MixerChannel::MixerChannel(int sr) : sampleRate(sr) {
+MixerChannel::MixerChannel(int sr) : sampleRate(sr), eq(sr) {
     procPtrs.resize(2);
 }
 
@@ -15,6 +15,7 @@ MixerChannel::~MixerChannel() {
 
 void MixerChannel::setSampleRate(int sr) {
     sampleRate = sr;
+    eq.setSampleRate(sr);
     // VST3 sample-rate changes would require re-initializing instances. For now
     // we only store the new rate; new instances pick it up on creation.
 }
@@ -44,6 +45,9 @@ void MixerChannel::process(const float* input, float* output, int frames) {
 
     procPtrs[0] = procBuffer[0].data();
     procPtrs[1] = procBuffer[1].data();
+
+    // Channel EQ first — this is the deck's signal before the rest of the mixer.
+    eq.process(procPtrs[0], procPtrs[1], frames);
 
     // Process VSTs (only if the runtime plugin is loaded).
     if (const LzrVst3Api* vst = Vst3Runtime::api()) {

@@ -21,13 +21,15 @@ Deck::Deck(int sr) : currentFrame(0), visualFrame(0.0), playing(false), loading(
 }
 
 Deck::~Deck() {
-    analyzing.store(false); // Signal stop
+    analysisCancel.store(true); // Bail the analysis loop fast, skip final getBpm()
+    analyzing.store(false);     // Signal stop
     if (loaderThread.joinable()) loaderThread.join();
     if (analysisThread.joinable()) analysisThread.join();
     delete stretcher;
 }
 
 bool Deck::load(const std::string& filepath, AnalysisDB* db) {
+    analysisCancel.store(true); // Bail any in-flight analysis so we don't block here
     analyzing.store(false);
     if (loaderThread.joinable()) loaderThread.join();
     if (analysisThread.joinable()) analysisThread.join();
@@ -56,6 +58,15 @@ bool Deck::load(const std::string& filepath, AnalysisDB* db) {
     bpm.store(0.0f);
     beatOffset.store(0.0f);
     bpmManual.store(false);
+
+    // Reset loop and sync state
+    loopActive.store(false);
+    loopStart.store(0);
+    loopEnd.store(0);
+    recallStart.store(0);
+    recallEnd.store(0);
+    syncActive.store(false);
+    syncSource.store(-1);
     
     // Reset stretcher and speed
     {
@@ -67,7 +78,7 @@ bool Deck::load(const std::string& filepath, AnalysisDB* db) {
     currentProcessSpeed = 1.0;
     
     currentFilepath = filepath;
-    currentFileHash = 0;
+    currentFileHash = "";
 
     loaderThread = std::thread(&Deck::loaderWork, this, filepath, db);
 
@@ -77,14 +88,39 @@ bool Deck::load(const std::string& filepath, AnalysisDB* db) {
 void Deck::saveAnalysis(AnalysisDB& db) {
     if (currentFilepath.empty()) return; 
     
-    if (currentFileHash == 0) {
+    if (currentFileHash == "") {
         currentFileHash = AnalysisDB::computeHash(currentFilepath);
     }
     
-    if (currentFileHash != 0) {
+    if (currentFileHash != "") {
         db.save(currentFileHash, bpm.load(), beatOffset.load());
         Logger::info("Saved analysis for " + currentFilepath);
     }
+}
+
+void Deck::reanalyze(AnalysisDB& db) {
+    if (currentFilepath.empty()) return;
+    if (loading.load()) return; // track still streaming in; ignore
+
+    // Stop any analysis already in flight.
+    analysisCancel.store(true);
+    analyzing.store(false);
+    if (analysisThread.joinable()) analysisThread.join();
+
+    // Drop the cached entry so a fresh detection isn't short-circuited.
+    if (currentFileHash == "") {
+        currentFileHash = AnalysisDB::computeHash(currentFilepath);
+    }
+    if (currentFileHash != "") db.remove(currentFileHash);
+
+    // Clear any manual override and the current value, then run detection again.
+    bpmManual.store(false);
+    bpm.store(0.0f);
+
+    analysisCancel.store(false);
+    analyzing.store(true);
+    analysisThread = std::thread(&Deck::analyzeBPMWork, this, &db);
+    Logger::info("Re-analyzing BPM for " + currentFilepath);
 }
 
 void Deck::addTrigger(int id, float beat) {
@@ -118,7 +154,7 @@ void Deck::resetTriggers() {
     }
 }
 
-void Deck::analyzeBPMWork() {
+void Deck::analyzeBPMWork(AnalysisDB* db) {
     soundtouch::BPMDetect bpmDetector(2, sampleRate);
 
     uint64_t processedFrames = 0;
@@ -127,6 +163,7 @@ void Deck::analyzeBPMWork() {
     Logger::info("Starting BPM analysis...");
 
     while (analyzing.load()) {
+        if (analysisCancel.load()) { analyzing.store(false); return; }
         uint64_t avail = framesAvailable.load();
         bool isLoaded = !loading.load();
         uint64_t framesToProcess = chunkSize;
@@ -179,14 +216,23 @@ void Deck::analyzeBPMWork() {
         }
     }
 
+    // Cancelled mid-stream (new load or manual override) — bail before the
+    // expensive final pass and don't touch bpm or the DB.
+    if (analysisCancel.load()) { analyzing.store(false); return; }
+
     Logger::info("Analyzing BPM from " + std::to_string(processedFrames) + " frames...");
 
     float result = bpmDetector.getBpm();
-    if (bpmManual.load()) {
-        Logger::info("BPM analysis discarded (manual override in effect)");
+    if (bpmManual.load() || analysisCancel.load()) {
+        Logger::info("BPM analysis discarded (manual override or cancelled)");
     } else if (result > 0.0f) {
         bpm.store(result);
         Logger::info("BPM Detected: " + std::to_string(result));
+        // Persist so future loads hit the DB instead of re-analyzing.
+        if (db && currentFileHash != "") {
+            db->save(currentFileHash, result, beatOffset.load());
+            Logger::info("Saved analysis to DB for " + currentFilepath);
+        }
     } else {
         Logger::warn("BPM detection failed");
     }
@@ -195,6 +241,21 @@ void Deck::analyzeBPMWork() {
 }
 
 void Deck::loaderWork(std::string filepath, AnalysisDB* db) {
+    std::string hash = AnalysisDB::computeHash(filepath);
+    currentFileHash = hash;
+
+    // Check DB for analysis early
+    bool analysisFound = false;
+    float dbBpm = 0.0f, dbOffset = 0.0f;
+    if (db && currentFileHash != "") {
+        if (db->get(currentFileHash, dbBpm, dbOffset)) {
+            bpm.store(dbBpm);
+            beatOffset.store(dbOffset);
+            Logger::info("Loaded analysis from DB: BPM " + std::to_string(dbBpm) + ", Offset " + std::to_string(dbOffset));
+            analysisFound = true;
+        }
+    }
+
     ma_decoder decoder;
     ma_result result = ma_decoder_init_file(filepath.c_str(), NULL, &decoder);
     if (result != MA_SUCCESS) {
@@ -202,9 +263,6 @@ void Deck::loaderWork(std::string filepath, AnalysisDB* db) {
         loading.store(false);
         return;
     }
-
-    uint64_t hash = AnalysisDB::computeHash(filepath);
-    currentFileHash = hash;
 
     ma_uint64 totalFrames;
     if (ma_decoder_get_length_in_pcm_frames(&decoder, &totalFrames) != MA_SUCCESS) {
@@ -269,21 +327,10 @@ void Deck::loaderWork(std::string filepath, AnalysisDB* db) {
     loading.store(false);
     Logger::info("Loaded " + std::to_string(framesReadTotal) + " frames from " + filepath);
 
-    // Check DB for analysis
-    bool analysisFound = false;
-    if (db && currentFileHash != 0) {
-        float dbBpm, dbOffset;
-        if (db->get(currentFileHash, dbBpm, dbOffset)) {
-            bpm.store(dbBpm);
-            beatOffset.store(dbOffset);
-            Logger::info("Loaded analysis from DB: BPM " + std::to_string(dbBpm) + ", Offset " + std::to_string(dbOffset));
-            analysisFound = true;
-        }
-    }
-
     if (!analysisFound) {
+        analysisCancel.store(false);
         analyzing.store(true);
-        analysisThread = std::thread(&Deck::analyzeBPMWork, this);
+        analysisThread = std::thread(&Deck::analyzeBPMWork, this, db);
     }
 }
 
@@ -608,7 +655,7 @@ uint32_t Deck::copyWaveBins(uint64_t start, uint32_t count,
 }
 
 void Deck::setSpeed(double s) {
-    if (s < 0.1) s = 0.1;
+    if (s < 0.001) s = 0.001;
     if (s > 4.0) s = 4.0;
     speed.store(s);
 }

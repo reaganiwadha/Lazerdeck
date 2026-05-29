@@ -19,6 +19,31 @@ const double _kSppDefault = 256.0;
 // Each button press multiplies / divides by this factor (one "octave" step).
 const double _kZoomStep = 2.0;
 
+// Waveform amplitude is drawn on a logarithmic (dB) scale, MiniMeters-style:
+// the center line is silence (-inf dB) and the loud end is expanded so peaks
+// don't slam flat against the edge and read as clipping. [_kWaveCurve] > 1
+// devotes more vertical space to the loud region, so the dB range near 0 dBFS
+// changes slowly. The mapped range spans [_kWaveFloorDb, _kWaveCeilDb]; the
+// ceiling above 0 dBFS leaves headroom for transients to poke through.
+const double _kWaveFloorDb = -54.0;
+const double _kWaveCeilDb = 6.0;
+const double _kWaveCurve = 2.0;
+
+/// Maps a linear amplitude (>= 0) to a 0..1 vertical position on the dB curve.
+/// 0 at/below the floor (center line), 1 at the ceiling (full height).
+double _ampToUnit(double amp) {
+  if (amp <= 0) return 0.0;
+  final db = 20.0 * (math.log(amp) / math.ln10);
+  var v = (db - _kWaveFloorDb) / (_kWaveCeilDb - _kWaveFloorDb);
+  if (v <= 0) return 0.0;
+  if (v > 1) v = 1.0;
+  return math.pow(v, _kWaveCurve).toDouble();
+}
+
+// Beat-grid density limit. As you zoom out, beats are skipped in power-of-two
+// strides so numbered lines never crowd closer than _kMinBeatLabelPx apart.
+const double _kMinBeatLabelPx = 36.0;
+
 class WaveformView extends StatefulWidget {
   final LazerdeckEngine engine;
   final int deck;
@@ -214,7 +239,7 @@ class _WavePainter extends CustomPainter {
 
     final half = w / 2;
     final cy = h / 2;
-    final scale = h / 2 * 0.9;
+    final scale = h / 2 * 0.95;
 
     // Visual samples-per-pixel: speed up the scroll with tempo so a sped-up
     // track still covers the same screen width per beat (mirrors the engine's
@@ -265,18 +290,19 @@ class _WavePainter extends CustomPainter {
       final rms = math.sqrt(rmsSumSq / (b1 - b0));
       final color = wf.colors[b0];
 
-      // Punchy visual height: RMS-compressed body + transient-boosted peaks.
-      //   body      = dynamic-range-compressed RMS floor
-      //   peak      = raw excursion, boosted at transient sites
+      // Logarithmic (dB) height: silence sits on the center line and the loud
+      // end is expanded (see _ampToUnit), so hot/normalized tracks show their
+      // dynamics near the top instead of slamming flat and reading as clipping.
+      //   body      = RMS floor, lifted at least to the body height
+      //   peak      = raw excursion, boosted at transient sites into headroom
       //   direction = preserved (waveform is asymmetric, not a mirrored bar)
-      final body          = math.pow(rms, 0.55);
       final transientBoost = 1.0 + 1.8 * maxTransient;
-      final displayMx     = math.max(body,  mx * transientBoost);
-      final displayMn     = math.min(-body, mn * transientBoost);
+      final upMag = math.max(rms, mx > 0 ? mx * transientBoost : 0.0);
+      final dnMag = math.max(rms, mn < 0 ? -mn * transientBoost : 0.0);
 
       // Screen Y grows downward; positive sample → above center.
-      var yTop = cy - displayMx * scale;
-      var yBot = cy - displayMn * scale;
+      var yTop = cy - _ampToUnit(upMag) * scale;
+      var yBot = cy + _ampToUnit(dnMag) * scale;
       if (yBot - yTop < 1) yBot = yTop + 1; // keep silence as a hairline
 
       final xL = x.toDouble();
@@ -312,36 +338,83 @@ class _WavePainter extends CustomPainter {
   void _drawBeatGrid(Canvas canvas, Size size, double spp, double half) {
     if (m.bpm <= 0 || m.sampleRate <= 0) return;
     final framesPerBeat = m.sampleRate * 60.0 / m.bpm;
+    if (framesPerBeat <= 0) return;
+
+    // Screen pixels covered by one beat at the current zoom.
+    final beatPx = framesPerBeat / spp;
+
+    // Adaptive density: step the stride up in powers of two until labels are at
+    // least _kMinBeatLabelPx apart. Lines and labels share the same stride, so
+    // every drawn line is a numbered line and the count is capped no matter how
+    // far out you zoom.
+    var stride = 1;
+    while (stride * beatPx < _kMinBeatLabelPx) {
+      stride <<= 1;
+    }
+
     final startFrame = m.currentFrame - half * spp;
     final endFrame = m.currentFrame + (size.width - half) * spp;
-    final startBeat = ((startFrame - m.beatOffset) / framesPerBeat).floor();
+    var startBeat = ((startFrame - m.beatOffset) / framesPerBeat).floor();
+    // Snap down to a multiple of the stride so lines stay phase-stable (they
+    // don't shimmer between which beats are drawn) as the track scrolls.
+    startBeat -= ((startBeat % stride) + stride) % stride;
 
     // Invert against whatever's behind so the grid is always high-contrast:
     // bright white over the dark background, dark over loud waveform peaks.
-    // Wide strokes + difference blend make the lines impossible to miss.
     final beat = Paint()
       ..blendMode = BlendMode.difference
       ..color = Colors.white
-      ..strokeWidth = 2.5;
+      ..strokeWidth = 2.0;
     final bar = Paint()
       ..blendMode = BlendMode.difference
       ..color = Colors.white
-      ..strokeWidth = 5;
+      ..strokeWidth = 4.0;
 
-    // When zoomed far out, beats collapse into a solid wall — drop the
-    // per-beat lines and keep only the bar (downbeat) lines.
-    final beatPx = framesPerBeat / spp;
-    final drawBeats = beatPx >= 7;
-
-    for (var i = startBeat;; i++) {
+    for (var i = startBeat;; i += stride) {
       final beatFrame = i * framesPerBeat + m.beatOffset;
       if (beatFrame > endFrame) break;
       final x = half + (beatFrame - m.currentFrame) / spp;
       if (x < -3 || x > size.width + 3) continue;
+      // Downbeats (every 4th beat) get the heavier stroke.
       final isBar = i % 4 == 0;
-      if (!isBar && !drawBeats) continue;
       canvas.drawLine(Offset(x, 0), Offset(x, size.height), isBar ? bar : beat);
+      // Beat numbers are 1-based like the old SDL renderer; every drawn line is
+      // labeled, never for beats before the grid origin.
+      if (i >= 0) {
+        _drawBeatLabel(canvas, x, i + 1);
+      }
     }
+  }
+
+  // Cached, pre-laid-out number painters — labels repeat every frame, so we
+  // never want to re-shape the same string at 60fps.
+  final Map<int, TextPainter> _labelCache = {};
+
+  TextPainter _labelPainter(int n) => _labelCache.putIfAbsent(n, () {
+        return TextPainter(
+          text: TextSpan(
+            text: '$n',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          textDirection: TextDirection.ltr,
+        )..layout();
+      });
+
+  void _drawBeatLabel(Canvas canvas, double x, int number) {
+    final tp = _labelPainter(number);
+    const padX = 3.0;
+    const padY = 1.0;
+    // Dark pill behind the number so it reads over both background and peaks.
+    final rect = Rect.fromLTWH(x + 2, 2, tp.width + padX * 2, tp.height + padY * 2);
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(rect, const Radius.circular(3)),
+      Paint()..color = Colors.black.withValues(alpha: 0.55),
+    );
+    tp.paint(canvas, Offset(x + 2 + padX, 2 + padY));
   }
 
   void _drawPlayhead(Canvas canvas, Size size, double half) {

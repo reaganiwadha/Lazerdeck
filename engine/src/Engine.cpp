@@ -128,6 +128,16 @@ void Engine::processCommands() {
                             mixer->getChannel(deckIdx)->setVolume(vol);
                         }
                     }
+                    else if (action == "eq_low" || action == "eq_mid" || action == "eq_high") {
+                        float v;
+                        if (iss >> v && mixer) {
+                            if (auto* ch = mixer->getChannel(deckIdx)) {
+                                if (action == "eq_low") ch->setEqLow(v);
+                                else if (action == "eq_mid") ch->setEqMid(v);
+                                else ch->setEqHigh(v);
+                            }
+                        }
+                    }
                     else if (action == "bpm") {
                         float value;
                         if (iss >> value && value > 0.0f) {
@@ -148,6 +158,9 @@ void Engine::processCommands() {
                             decks[deckIdx]->nudgeBeatOffset(delta);
                             decks[deckIdx]->saveAnalysis(analysisDB);
                         }
+                    }
+                    else if (action == "reanalyze") {
+                        decks[deckIdx]->reanalyze(analysisDB);
                     }
                     else if (action == "metronome") {
                         int on;

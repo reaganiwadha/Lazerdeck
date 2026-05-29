@@ -3,6 +3,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include "ThreeBandEQ.hpp"
 
 namespace Lazerdeck {
 
@@ -39,10 +40,16 @@ public:
     void setVolume(float v) { volume = v; }
     float getVolume() const { return volume; }
 
+    // 3-band channel EQ (knob values 0..1, 0.5 = unity). Applied before VSTs.
+    void setEqLow(float knob)  { eq.setLow(knob); }
+    void setEqMid(float knob)  { eq.setMid(knob); }
+    void setEqHigh(float knob) { eq.setHigh(knob); }
+
 private:
     void destroySlot(VstSlot& slot); // requires vstMutex held
 
     int sampleRate;
+    ThreeBandEQ eq;
     std::vector<VstSlot> vstEffects;
     std::mutex vstMutex;
     bool isDefining = false;

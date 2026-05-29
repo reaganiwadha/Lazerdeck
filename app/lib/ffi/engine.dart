@@ -223,10 +223,24 @@ class LazerdeckEngine {
   void setMetronome(int deck, bool on) =>
       pushCommand('${_d(deck)} metronome ${on ? 1 : 0}');
 
+  /// Deletes this track's cached analysis and re-runs BPM detection.
+  void reanalyze(int deck) => pushCommand('${_d(deck)} reanalyze');
+
   /// Nudge tempo up/down by ~1 BPM (engine-clamped), or reset to 0% (1.0x).
   void speedUp(int deck) => pushCommand('${_d(deck)} speed_up');
   void speedDown(int deck) => pushCommand('${_d(deck)} speed_down');
   void resetSpeed(int deck) => pushCommand('${_d(deck)} speed_reset');
+  void setSpeed(int deck, double speed) =>
+      pushCommand('${_d(deck)} speed $speed');
+
+  /// 3-band channel EQ. [value] is 0..1 with 0.5 = unity (0 dB), 1.0 = +6 dB,
+  /// 0.0 = full kill — a DJM-style curve handled engine-side.
+  void setEqLow(int deck, double value) =>
+      pushCommand('${_d(deck)} eq_low $value');
+  void setEqMid(int deck, double value) =>
+      pushCommand('${_d(deck)} eq_mid $value');
+  void setEqHigh(int deck, double value) =>
+      pushCommand('${_d(deck)} eq_high $value');
 
   /// Loop in-point (A), out-point (B, activates the loop), and exit.
   void loopIn(int deck) => pushCommand('${_d(deck)} loop_in');

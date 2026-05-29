@@ -29,16 +29,20 @@ class BpmPanel extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        hasBpm ? _bpmReadout(s!) : _unknownReadout(),
-        const SizedBox(width: 14),
+        SizedBox(
+          width: 160,
+          child: hasBpm ? _bpmReadout(s!) : _unknownReadout(),
+        ),
+        const SizedBox(width: 4),
         _pitchControl(s),
-        const SizedBox(width: 12),
+        const SizedBox(width: 8),
         _offsetControl(hasBpm ? s! : null),
-        const SizedBox(width: 10),
+        const SizedBox(width: 8),
         // Metronome toggle.
         _MiniButton(
-          icon: Icons.av_timer,
+          icon: Icons.timer_outlined,
           tooltip: 'Metronome',
+          noBorder: true,
           lit: s?.metronomeEnabled ?? false,
           onTap: () =>
               engine.setMetronome(deck, !(s?.metronomeEnabled ?? false)),
@@ -48,6 +52,7 @@ class BpmPanel extends StatelessWidget {
         _MiniButton(
           icon: Icons.edit,
           tooltip: 'Enter BPM & offset',
+          noBorder: true,
           tint: hasBpm ? Colors.white54 : _accent,
           onTap: () => _editDialog(context),
         ),
@@ -66,7 +71,7 @@ class BpmPanel extends StatelessWidget {
           textBaseline: TextBaseline.alphabetic,
           children: [
             Text(
-              '${s.bpm.toStringAsFixed(1)}/${s.effectiveBpm.toStringAsFixed(1)}',
+              '${s.effectiveBpm.toStringAsFixed(1)}/${s.bpm.toStringAsFixed(1)}',
               style: const TextStyle(
                 fontSize: 22,
                 height: 1.0,
@@ -79,6 +84,7 @@ class BpmPanel extends StatelessWidget {
               'BPM',
               style: TextStyle(
                 fontSize: 10,
+                fontFamily: 'bitroad',
                 color: Colors.white38,
               ),
             ),
@@ -93,50 +99,50 @@ class BpmPanel extends StatelessWidget {
     final adjusted = (s?.speed ?? 1.0) != 1.0;
     final sign = pct >= 0 ? '+' : '−';
     final pctStr = '$sign${pct.abs().toStringAsFixed(1)}%';
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
+    return Row(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        const Text('PITCH',
-            style: TextStyle(
-                fontSize: 8, letterSpacing: 1.5, color: Colors.white38)),
-        const SizedBox(height: 1),
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _MiniButton(
-              icon: Icons.remove,
-              tooltip: 'Slower (−1 BPM)',
-              size: 24,
-              onTap: () => engine.speedDown(deck),
-            ),
-            // Tap the percentage to reset tempo to 0%.
-            Tooltip(
-              message: 'Reset tempo',
-              child: InkWell(
-                borderRadius: BorderRadius.circular(4),
-                onTap: () => engine.resetSpeed(deck),
-                child: SizedBox(
-                  width: 52,
-                  child: Text(
-                    pctStr,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      fontFamily: 'monospace',
-                      color: adjusted ? _accent : Colors.white60,
-                    ),
+        _MiniButton(
+          child: _hybridIcon(Icons.remove, Icons.access_time),
+          tooltip: 'Slower (−1 BPM)',
+          size: 24,
+          noBorder: true,
+          onTap: () => engine.speedDown(deck),
+        ),
+        // Tap the percentage to reset tempo to 0%, or drag to adjust.
+        Tooltip(
+          message: 'Reset tempo (tap) / Adjust (drag)',
+          child: GestureDetector(
+            onVerticalDragUpdate: (details) {
+              if (s == null) return;
+              final next = (s.speed - details.delta.dy * 0.0005).clamp(0.001, 4.0);
+              engine.setSpeed(deck, next);
+            },
+            child: InkWell(
+              borderRadius: BorderRadius.circular(4),
+              onTap: () => engine.resetSpeed(deck),
+              child: SizedBox(
+                width: 60,
+                child: Text(
+                  pctStr,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    fontFamily: 'bitroad',
+                    color: adjusted ? _accent : Colors.white60,
                   ),
                 ),
               ),
             ),
-            _MiniButton(
-              icon: Icons.add,
-              tooltip: 'Faster (+1 BPM)',
-              size: 24,
-              onTap: () => engine.speedUp(deck),
-            ),
-          ],
+          ),
+        ),
+        _MiniButton(
+          child: _hybridIcon(Icons.add, Icons.access_time),
+          tooltip: 'Faster (+1 BPM)',
+          size: 24,
+          noBorder: true,
+          onTap: () => engine.speedUp(deck),
         ),
       ],
     );
@@ -149,10 +155,14 @@ class BpmPanel extends StatelessWidget {
       children: const [
         Text('???  BPM',
             style: TextStyle(
-                fontSize: 20, fontWeight: FontWeight.w600, color: Colors.white38)),
+                fontSize: 20,
+                fontFamily: 'bitroad',
+                fontWeight: FontWeight.w600,
+                color: Colors.white38)),
         SizedBox(height: 2),
         Text('tap ✎ to set tempo',
-            style: TextStyle(fontSize: 10, color: _accent)),
+            style: TextStyle(
+                fontSize: 10, fontFamily: 'bitroad', color: _accent)),
       ],
     );
   }
@@ -161,40 +171,45 @@ class BpmPanel extends StatelessWidget {
     final label = s == null
         ? '???'
         : '${s.offsetMs >= 0 ? '+' : '−'}${s.offsetMs.abs().toStringAsFixed(0)}ms';
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
+    return Row(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        const Text('OFFSET',
-            style: TextStyle(
-                fontSize: 8, letterSpacing: 1.5, color: Colors.white38)),
-        const SizedBox(height: 1),
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _MiniButton(
-              icon: Icons.remove,
-              tooltip: '−${_offsetNudgeMs.toStringAsFixed(0)} ms',
-              size: 24,
-              onTap: () => engine.nudgeBeatOffsetMs(deck, -_offsetNudgeMs),
-            ),
-            SizedBox(
-              width: 48,
-              child: Text(
-                label,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                    fontSize: 11,
-                    fontFamily: 'monospace',
-                    color: Colors.white70),
-              ),
-            ),
-            _MiniButton(
-              icon: Icons.add,
-              tooltip: '+${_offsetNudgeMs.toStringAsFixed(0)} ms',
-              size: 24,
-              onTap: () => engine.nudgeBeatOffsetMs(deck, _offsetNudgeMs),
-            ),
-          ],
+        _MiniButton(
+          child: _hybridIcon(Icons.remove, Icons.music_note),
+          tooltip: '−${_offsetNudgeMs.toStringAsFixed(0)} ms',
+          size: 24,
+          noBorder: true,
+          onTap: () => engine.nudgeBeatOffsetMs(deck, -_offsetNudgeMs),
+        ),
+        SizedBox(
+          width: 56,
+          child: Text(
+            label,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+                fontSize: 11, fontFamily: 'bitroad', color: Colors.white70),
+          ),
+        ),
+        _MiniButton(
+          child: _hybridIcon(Icons.add, Icons.music_note),
+          tooltip: '+${_offsetNudgeMs.toStringAsFixed(0)} ms',
+          size: 24,
+          noBorder: true,
+          onTap: () => engine.nudgeBeatOffsetMs(deck, _offsetNudgeMs),
+        ),
+      ],
+    );
+  }
+
+  Widget _hybridIcon(IconData base, IconData type) {
+    return Stack(
+      alignment: Alignment.center,
+      children: [
+        Icon(base, size: 18, color: Colors.white60),
+        Positioned(
+          right: -2,
+          bottom: -2,
+          child: Icon(type, size: 10, color: Colors.white38),
         ),
       ],
     );
@@ -234,6 +249,21 @@ class BpmPanel extends StatelessWidget {
                 hintText: '0',
               ),
             ),
+            const SizedBox(height: 16),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                style: TextButton.styleFrom(foregroundColor: _accent),
+                icon: const Icon(Icons.refresh, size: 18),
+                label: const Text('Delete from database & re-analyze'),
+                onPressed: (s != null && s.hasTrack)
+                    ? () {
+                        engine.reanalyze(deck);
+                        Navigator.of(context).pop(false);
+                      }
+                    : null,
+              ),
+            ),
           ],
         ),
         actions: [
@@ -261,20 +291,24 @@ class BpmPanel extends StatelessWidget {
 }
 
 class _MiniButton extends StatelessWidget {
-  final IconData icon;
+  final IconData? icon;
+  final Widget? child;
   final String tooltip;
   final VoidCallback onTap;
   final bool lit;
   final Color? tint;
   final double size;
+  final bool noBorder;
 
   const _MiniButton({
-    required this.icon,
+    this.icon,
+    this.child,
     required this.tooltip,
     required this.onTap,
     this.lit = false,
     this.tint,
     this.size = 28,
+    this.noBorder = false,
   });
 
   @override
@@ -290,13 +324,18 @@ class _MiniButton extends StatelessWidget {
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(6),
             color: lit ? const Color(0x22E0344B) : Colors.transparent,
-            border: Border.all(
-                color: lit ? const Color(0x88E0344B) : Colors.white12),
+            border: noBorder
+                ? null
+                : Border.all(
+                    color: lit ? const Color(0x88E0344B) : Colors.white12),
           ),
-          child: Icon(
-            icon,
-            size: size * 0.55,
-            color: lit ? _accent : (tint ?? Colors.white60),
+          child: Center(
+            child: child ??
+                Icon(
+                  icon,
+                  size: size * 0.55,
+                  color: lit ? _accent : (tint ?? Colors.white60),
+                ),
           ),
         ),
       ),

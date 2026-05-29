@@ -4,7 +4,10 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../ffi/engine.dart';
+import 'analyze_overlay.dart';
 import 'bpm_panel.dart';
+import 'cover_art.dart';
+import 'eq_panel.dart';
 import 'settings_dialog.dart';
 import 'waveform_view.dart';
 
@@ -73,10 +76,31 @@ class _DecksViewState extends State<DecksView> {
                   ],
                 ),
               ),
-              // Signal routing diagram down the right edge.
+              // Signal routing diagram down the right edge, with each deck's
+              // 3-band EQ knobs overlaid at the top of its slice.
               SizedBox(
-                width: 132,
-                child: _RoutingDiagram(deckCount: count, states: _states),
+                width: 150,
+                child: Stack(
+                  children: [
+                    Positioned.fill(
+                      child: _RoutingDiagram(deckCount: count, states: _states),
+                    ),
+                    Column(
+                      children: [
+                        for (var i = 0; i < count; i++)
+                          Expanded(
+                            child: Align(
+                              alignment: Alignment.topCenter,
+                              child: Padding(
+                                padding: const EdgeInsets.only(top: 10),
+                                child: EqPanel(engine: widget.engine, deck: i),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
@@ -134,14 +158,14 @@ class _DeckPanel extends StatelessWidget {
     final playing = s?.isPlaying ?? false;
     final letter = String.fromCharCode('A'.codeUnitAt(0) + index);
     final hasTrack = s != null && s.hasTrack;
-    final title = hasTrack ? _basename(s.filepath) : 'No track loaded';
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(0, 6, 8, 6),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Edge-to-edge waveform, thin framed like the old SDL view.
+          // Edge-to-edge waveform, thin framed like the old SDL view, with the
+          // "Deck A/B" label overlaid in the top-left corner.
           Expanded(
             child: DecoratedBox(
               decoration: BoxDecoration(
@@ -149,7 +173,36 @@ class _DeckPanel extends StatelessWidget {
                   color: playing ? const Color(0x55E0344B) : Colors.white12,
                 ),
               ),
-              child: WaveformView(engine: engine, deck: index),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  WaveformView(engine: engine, deck: index),
+                  Positioned(
+                    top: 6,
+                    left: 10,
+                    child: StrokedText(
+                      'Deck $letter',
+                      fontSize: 17,
+                      fontFamily: 'bitroad',
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 1,
+                      strokeWidth: 3,
+                    ),
+                  ),
+                  Positioned(
+                    top: 6,
+                    left: 0,
+                    right: 0,
+                    child: Center(
+                      child: AnalyzeOverlay(
+                        isAnalyzing: s?.isAnalyzing ?? false,
+                        hasBpm: s?.hasBpm ?? false,
+                        trackId: s?.filepath ?? '',
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
           const SizedBox(height: 8),
@@ -157,46 +210,19 @@ class _DeckPanel extends StatelessWidget {
             height: 64,
             child: Row(
               children: [
-                // Big A / B selector + title — tap to load a track. Flexible so
-                // the title ellipsizes instead of overflowing on narrow windows.
+                // Cover art + title/artist — tap to load a track. The text
+                // block auto-shrinks to fit the available width.
                 Expanded(
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: InkWell(
-                      onTap: onOpen,
-                      borderRadius: BorderRadius.circular(6),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 4),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              letter,
-                              style: const TextStyle(
-                                fontSize: 54,
-                                height: 1.0,
-                                fontWeight: FontWeight.w700,
-                                fontFamily: 'advercase',
-                                color: Colors.white,
-                              ),
-                            ),
-                            const SizedBox(width: 18),
-                            Flexible(
-                              child: Text(
-                                title,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontSize: 26,
-                                  fontWeight: FontWeight.w400,
-                                  fontFamily: 'bitroad',
-                                  color: Colors.white,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
+                  child: InkWell(
+                    onTap: onOpen,
+                    borderRadius: BorderRadius.circular(6),
+                    child: Padding(
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      child: DeckTrackHeader(
+                        path: hasTrack ? s.filepath : null,
+                        fallbackName: hasTrack ? _basename(s.filepath) : '',
+                        coverSize: 54,
                       ),
                     ),
                   ),
@@ -231,27 +257,35 @@ class _DeckPanel extends StatelessWidget {
                         mainAxisAlignment: MainAxisAlignment.center,
                         crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
-                          Text(
-                            s?.barBeat ?? '—.—',
-                            style: TextStyle(
-                              fontSize: 26,
-                              height: 1.0,
-                              fontFamily: 'monospace',
-                              fontWeight: FontWeight.w600,
-                              letterSpacing: 1,
-                              color: playing
-                                  ? const Color(0xFFE0344B)
-                                  : Colors.white,
+                          SizedBox(
+                            width: 140,
+                            child: Text(
+                              s?.barBeat ?? '—.—',
+                              textAlign: TextAlign.right,
+                              style: TextStyle(
+                                fontSize: 26,
+                                height: 1.0,
+                                fontFamily: 'bitroad',
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: 1,
+                                color: playing
+                                    ? const Color(0xFFE0344B)
+                                    : Colors.white,
+                              ),
                             ),
                           ),
                           const SizedBox(height: 2),
-                          Text(
-                            _timecode(s?.position ?? Duration.zero),
-                            style: const TextStyle(
-                              fontSize: 14,
-                              fontFamily: 'monospace',
-                              letterSpacing: 1,
-                              color: Colors.white38,
+                          SizedBox(
+                            width: 140,
+                            child: Text(
+                              _timecode(s?.position ?? Duration.zero),
+                              textAlign: TextAlign.right,
+                              style: const TextStyle(
+                                fontSize: 14,
+                                fontFamily: 'bitroad',
+                                letterSpacing: 1,
+                                color: Colors.white38,
+                              ),
                             ),
                           ),
                         ],

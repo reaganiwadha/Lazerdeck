@@ -31,6 +31,8 @@ public:
 
     bool load(const std::string& filepath, AnalysisDB* db = nullptr);
     void saveAnalysis(AnalysisDB& db);
+    // Drops this track's cached analysis and runs BPM detection again.
+    void reanalyze(AnalysisDB& db);
 
     // Triggers
     void addTrigger(int id, float beat);
@@ -69,6 +71,7 @@ public:
     void setBpmManual(float b) {
         bpm.store(b);
         bpmManual.store(true);
+        analysisCancel.store(true);
         analyzing.store(false);
     }
 
@@ -145,7 +148,7 @@ public:
 
         void loaderWork(std::string filepath, AnalysisDB* db);
 
-        void analyzeBPMWork();
+        void analyzeBPMWork(AnalysisDB* db);
 
         // Appends complete WaveBins covering frames up to `framesAvailable`.
         // When `finalChunk` is set, also emits a trailing bin for the remainder.
@@ -198,6 +201,12 @@ public:
 
         std::atomic<bool> analyzing{false};
 
+        // Requests the running analysis thread bail out immediately (without
+        // running the expensive final getBpm() or persisting a result). Set by
+        // load()/setBpmManual()/~Deck so a new load doesn't block on a stale
+        // analysis. Cleared right before a fresh analysis starts.
+        std::atomic<bool> analysisCancel{false};
+
         // Set when the user overrides BPM by hand; blocks analyzeBPMWork from
         // overwriting it. Reset on load().
         std::atomic<bool> bpmManual{false};
@@ -215,8 +224,7 @@ public:
         // File Info
 
         std::string currentFilepath;
-
-        uint64_t currentFileHash = 0;
+        std::string currentFileHash = "";
 
     
 
