@@ -3,6 +3,20 @@
 #include <cmath>
 #include "Logger.hpp"
 
+namespace {
+// Master-bus soft limiter. Transparent (exactly linear) below the threshold,
+// then a tanh knee that asymptotes to the ±1.0 ceiling so summed decks can't
+// hard-clip. C1-continuous at the knee (slope 1 on both sides).
+inline float softLimit(float x) {
+    constexpr float t = 0.8f;                  // linear/transparent below this
+    const float a = std::fabs(x);
+    if (a <= t) return x;
+    constexpr float range = 1.0f - t;          // headroom to the 1.0 ceiling
+    const float over = a - t;
+    return (x < 0.0f ? -1.0f : 1.0f) * (t + range * std::tanh(over / range));
+}
+}  // namespace
+
 AudioEngine::AudioEngine() : stream(nullptr), initialized(false), sampleRate(44100), framesPerBuffer(0), latencyMs(0), actualSampleRate(44100) {
     mixState.engine = nullptr;
 }
@@ -31,6 +45,10 @@ bool AudioEngine::init(const std::vector<Deck*>& decks, Lazerdeck::Mixer* mixer,
     }
     initialized = true;
 
+    // Enumerate devices up front so the host UI can offer a picker even when we
+    // can't open anything automatically.
+    refreshDevices();
+
     // Pick the initial output device.
     PaDeviceIndex deviceIndex = paNoDevice;
 #ifdef _WIN32
@@ -46,12 +64,23 @@ bool AudioEngine::init(const std::vector<Deck*>& decks, Lazerdeck::Mixer* mixer,
         deviceIndex = Pa_GetDefaultOutputDevice();
         Logger::info("Using default audio API");
     }
+
+    // No default device, or the default device won't open: this is NOT fatal.
+    // Leave the stream closed and let the user select a working device from the
+    // host's audio settings (which calls reopen()). PortAudio stays initialized
+    // so device enumeration keeps working.
     if (deviceIndex == paNoDevice) {
-        Logger::error("No default output device");
-        return false;
+        Logger::warn("No default output device; starting with audio disabled. "
+                     "Select a device in audio settings.");
+        return true;
+    }
+    if (!openStream(deviceIndex)) {
+        Logger::warn("Could not open default output device; starting with audio "
+                     "disabled. Select a device in audio settings.");
+        return true;
     }
 
-    return openStream(deviceIndex);
+    return true;
 }
 
 void AudioEngine::regenerateMetronome() {
@@ -135,11 +164,16 @@ bool AudioEngine::openStream(PaDeviceIndex deviceIndex) {
     return true;
 }
 
-bool AudioEngine::reopen(int deviceIndex) {
+bool AudioEngine::reopen(int deviceIndex, int requestedRate) {
     std::lock_guard<std::mutex> lock(paMutex);
     if (!initialized) return false;
 
-    Logger::info("Reopening audio on device index " + std::to_string(deviceIndex));
+    // A new requested rate becomes the rate openStream tries first (it still
+    // falls back through supported rates if the device rejects it).
+    if (requestedRate > 0) sampleRate = requestedRate;
+
+    Logger::info("Reopening audio on device index " + std::to_string(deviceIndex) +
+                 " @ " + std::to_string(sampleRate) + " Hz");
 
     // Tear down the current stream first; Pa_StopStream/CloseStream block until
     // the callback has finished, so the device swap is race-free.
@@ -214,7 +248,13 @@ std::string AudioEngine::getCurrentHostApi() const {
 }
 
 bool AudioEngine::start() {
-    if (!stream) return false;
+    // No stream means we started with audio disabled (no usable device yet).
+    // That's a valid state — the engine runs and waits for the user to pick a
+    // device. Don't treat it as a failure.
+    if (!stream) {
+        Logger::warn("AudioEngine::start: no audio stream open (audio disabled)");
+        return true;
+    }
     PaError err = Pa_StartStream(stream);
     if (err != paNoError) {
         Logger::error("Failed to start stream: " + std::string(Pa_GetErrorText(err)));
@@ -295,7 +335,13 @@ int AudioEngine::audioCallback(
     if (mix->engine) {
         mix->engine->renderMetronome(out, framesPerBuffer);
     }
-    
+
+    // Master soft-limiter: keep the summed bus from hard-clipping when multiple
+    // decks (plus metronome) push past full scale.
+    for (unsigned long i = 0; i < framesPerBuffer * 2; ++i) {
+        out[i] = softLimit(out[i]);
+    }
+
     // Calculate latency
     if (timeInfo && mix->engine) {
         int latency = (int)(timeInfo->outputBufferDacTime * 1000.0);

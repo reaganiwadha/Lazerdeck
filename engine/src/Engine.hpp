@@ -15,8 +15,10 @@
 #include <map>
 #include <osc/OscReceivedElements.h>
 #include "ThreadSafeQueue.hpp"
+#include "Control.hpp"
 
 class OSCHandler;
+class ControlServer;
 
 // --- Beat keyframing (LazerScript automation) ---
 // One automation keyframe: a value at an absolute beat (from the grid origin).
@@ -50,7 +52,8 @@ static constexpr int kMarkerLabelLen = 48;
 struct ScriptTrigger {
     int deck;             // source deck whose playhead beat fires this
     double beat;          // 0-based source beat (grid origin = 0)
-    std::string command;  // LazerScript line run when it fires
+    std::string command;  // LazerScript line run when it fires (legacy text path)
+    std::function<void()> fn; // structured effect (JSON path); preferred over command
     bool fired = false;
     int kind = MARKER_GENERIC;
     int targetDeck = -1;  // deck the action affects (0-based); -1 = none/self
@@ -73,6 +76,20 @@ public:
 
     void pushCommand(const std::string& cmd);
 
+    // Structured JSON control plane (see Control.hpp / ControlServer). Thread-safe:
+    // each action is marshalled onto the engine thread (taskQueue) and run by
+    // dispatchAction. Called from the ControlServer's HTTP thread.
+    void submitActions(const ControlRequest& req);
+
+    // --- HTTP/JSON control server (host-controllable; see ControlServer) ---
+    // The engine tries to bind the default port at startup; a busy port is
+    // non-fatal (the server stays stopped). The host can start/stop it and pick a
+    // different port at runtime via these (all safe from the FFI thread).
+    bool startControlServer(int port); // true iff the bind succeeded
+    void stopControlServer();
+    bool isControlServerRunning() const;
+    int  getControlServerPort() const; // last requested/bound port
+
     void handleOSCCommand(int deckIdx, const std::string& cmd, const osc::ReceivedMessage& m);
     void handleSystemCommand(const std::string& cmd, const osc::ReceivedMessage& m);
     void queueTask(std::function<void()> task);
@@ -84,6 +101,17 @@ public:
         return decks[idx].get();
     }
     Lazerdeck::Mixer* getMixer() { return mixer.get(); }
+
+    // --- Beat-sync master election ---
+    // The "master" is the tempo reference every synced deck follows. It is
+    // elected automatically (see updateMaster): it always tracks a *playing*
+    // deck, so pausing/unloading the master promotes it to the deck still
+    // playing. Per-deck sync *intent* (setSyncWanted) is preserved across these
+    // role swaps; the master itself never follows. setMasterDeck is a manual
+    // override that holds only while that deck keeps playing.
+    int  getMasterDeck() const { return masterDeck.load(); }
+    void setMasterDeck(int deck);
+    void setSyncWanted(int deck, bool wanted);
 
     // --- Timeline overlay introspection (for the host's waveform overlay) ---
     // The deck timeline carries two families of annotations, both polled per
@@ -116,11 +144,19 @@ public:
     // Queues a device switch onto the engine thread; reopens the output stream
     // on `deviceIndex` without tearing down decks/mixer.
     void setAudioDevice(int deviceIndex);
+    // Queues a sample-rate change onto the engine thread: reopens the output at
+    // `rate` on the current device, retargets decks/mixer, and re-decodes loaded
+    // tracks at the new rate (resuming position + play state; loops/cues reset).
+    void setSampleRate(int rate);
 
 private:
     void processCommands();   // drains the LazerScript command queue
     void processTasks();
     void updateSync();
+    // Elects the master deck (promoting to a playing deck when the current
+    // master stops) and reconciles each deck's effective sync state from its
+    // intent (syncWanted) + the master. Called every service tick.
+    void updateMaster();
     void checkTriggers();
     void executeAction(const TriggerAction& action);
 
@@ -141,6 +177,36 @@ private:
     // Current absolute beat for a deck, or NaN if no usable tempo.
     double deckBeat(int deck) const;
 
+    // --- Structured verb helpers (engine thread) ---
+    // One method per verb, shared by the legacy text parser (processCommands)
+    // and the JSON dispatcher (dispatchAction). Decks are 0-based here; beats are
+    // 1-based (matching the UI grid / script convention).
+    void actLoad(int deck, const std::string& path);
+    void actPlay(int deck);
+    void actPause(int deck);
+    void actStop(int deck);
+    void actSeekSeconds(int deck, double seconds);
+    void actSpeed(int deck, double mult);
+    void actPlayjump(int deck, double beat);
+    void actBpm(int deck, double bpm);
+    void actOffset(int deck, double frames);
+    void actNudgeOffset(int deck, double delta);
+    void actReanalyze(int deck);
+    void actMetronome(int deck, bool on);
+    void actSync(int deck, bool on);
+    void actMaster(int deck);
+    // Jumps `subj` so its (1-based) `subjBeat` coincides in time with `ref`'s
+    // (1-based) `refBeat`. One-shot phase jump; assumes the decks are tempo-locked
+    // (see actSync) to stay aligned afterwards.
+    void actAlign(int subj, double subjBeat, int ref, double refBeat);
+
+    // 1-based script beat -> absolute frame on a deck's grid. false if no tempo.
+    bool frameForBeat(int deck, double scriptBeat, uint64_t& outFrame);
+
+    // Runs one parsed JSON action on the engine thread: resolves the deck, then
+    // either schedules it (action.onBeat set -> ScriptTrigger) or runs it now.
+    void dispatchAction(const ControlAction& a);
+
     void shutdown();
     void scanVSTs();          // SDK-free filesystem scan of installed .vst3 bundles
 
@@ -149,10 +215,17 @@ private:
     AnalysisDB analysisDB;
     std::unique_ptr<Lazerdeck::Mixer> mixer;
     std::unique_ptr<OSCHandler> oscHandler;
+    std::unique_ptr<ControlServer> controlServer;
 
     std::vector<std::unique_ptr<Deck>> decks;
 
     int sampleRate;
+
+    // Beat-sync master election state (engine thread only, except masterDeck
+    // which the host reads via getMasterDeck()). syncWanted[i] is deck i's sync
+    // intent; the elected master never follows regardless of its own intent.
+    std::atomic<int> masterDeck{0};
+    std::vector<bool> syncWanted;
 
     std::vector<std::function<void()>> taskQueue;
     std::mutex taskMutex;

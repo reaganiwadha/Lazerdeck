@@ -23,7 +23,9 @@ class DecksView extends StatefulWidget {
 class _DecksViewState extends State<DecksView> {
   Timer? _poll;
   List<DeckState?> _states = const [];
-  int? _masterDeckIndex;
+  // Beat-sync master is elected by the engine (see Engine::updateMaster); the
+  // UI just reflects it. -1 until the first poll.
+  int _masterDeck = -1;
 
   @override
   void initState() {
@@ -37,37 +39,12 @@ class _DecksViewState extends State<DecksView> {
       for (var i = 0; i < widget.engine.deckCount; i++)
         widget.engine.deckState(i),
     ];
-    _updateMasterElection(next);
-    if (mounted) setState(() => _states = next);
-  }
-
-  void _updateMasterElection(List<DeckState?> currentStates) {
-    if (currentStates.length < 2) return;
-    final deck0 = currentStates[0];
-    final deck1 = currentStates[1];
-    if (deck0 == null || deck1 == null) return;
-
-    final play0 = deck0.isPlaying;
-    final play1 = deck1.isPlaying;
-
-    if (play0 && !play1) {
-      _masterDeckIndex = 0;
-    } else if (play1 && !play0) {
-      _masterDeckIndex = 1;
-    } else {
-      // Both playing or both stopped
-      final sync0 = deck0.syncActive;
-      final sync1 = deck1.syncActive;
-
-      if (!sync0 && sync1) {
-        _masterDeckIndex = 0;
-      } else if (!sync1 && sync0) {
-        _masterDeckIndex = 1;
-      } else {
-        // Both synced or both manual
-        // Keep previous master, or default to 0 if none
-        _masterDeckIndex ??= 0;
-      }
+    final master = widget.engine.masterDeck();
+    if (mounted) {
+      setState(() {
+        _states = next;
+        _masterDeck = master;
+      });
     }
   }
 
@@ -104,21 +81,11 @@ class _DecksViewState extends State<DecksView> {
                           index: i,
                           state: i < _states.length ? _states[i] : null,
                           onOpen: () => _openFile(i),
-                          isMaster: _masterDeckIndex == i,
-                          onSetMaster: () {
-                            setState(() {
-                              _masterDeckIndex = i;
-                              // Master deck cannot have sync active
-                              widget.engine.setSync(i, -1);
-                              // The other deck, if sync is active, should follow this master deck
-                              final other = i == 0 ? 1 : 0;
-                              final otherState =
-                                  other < _states.length ? _states[other] : null;
-                              if (otherState != null && otherState.syncActive) {
-                                widget.engine.setSync(other, i);
-                              }
-                            });
-                          },
+                          isMaster: _masterDeck == i,
+                          // The engine owns election + sync reconciliation; just
+                          // request this deck as master and let the next poll
+                          // reflect it.
+                          onSetMaster: () => widget.engine.setMaster(i),
                         ),
                       ),
                   ],

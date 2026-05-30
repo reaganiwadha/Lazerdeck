@@ -76,6 +76,10 @@ LAZERDECK_API void    lazerdeck_shutdown();
 /* Introspection */
 LAZERDECK_API int32_t lazerdeck_get_deck_count();
 LAZERDECK_API int32_t lazerdeck_get_sample_rate();
+/* The deck index currently elected as the beat-sync master (the tempo reference
+ * every synced deck follows). Auto-promotes to a playing deck; set manually with
+ * the "$dN master" command. */
+LAZERDECK_API int32_t lazerdeck_get_master_deck();
 LAZERDECK_API int32_t lazerdeck_get_deck_state(int32_t deck_idx, LazerDeckState* out);
 
 /* Typed transport controls (return 1 on success, 0 on failure). */
@@ -85,6 +89,23 @@ LAZERDECK_API int32_t lazerdeck_pause(int32_t deck_idx);
 
 /* Raw LazerScript command channel (e.g. "$d1 seek 30"). */
 LAZERDECK_API void    lazerdeck_push_command(const char* cmd);
+
+/*
+ * HTTP/JSON control server (POST /action; default port 8203).
+ *
+ * The engine attempts to bind the default port at startup; a busy port is
+ * non-fatal (the server just stays stopped). The host can start/stop it and
+ * choose a different port at runtime:
+ *   control_start(port) binds 127.0.0.1:port synchronously and returns 1 iff the
+ *     bind succeeded (0 if the port is busy — try another). Restarts if running.
+ *   control_stop() stops the server.
+ *   control_is_running() reports whether it is currently serving.
+ *   control_get_port() returns the last requested/bound port.
+ */
+LAZERDECK_API int32_t lazerdeck_control_start(int32_t port);
+LAZERDECK_API void    lazerdeck_control_stop();
+LAZERDECK_API int32_t lazerdeck_control_is_running();
+LAZERDECK_API int32_t lazerdeck_control_get_port();
 
 /*
  * Audio device configuration.
@@ -101,6 +122,14 @@ LAZERDECK_API int32_t lazerdeck_get_audio_device_count();
 LAZERDECK_API int32_t lazerdeck_get_audio_device(int32_t list_index, LazerAudioDevice* out);
 LAZERDECK_API int32_t lazerdeck_get_audio_config(LazerAudioConfig* out);
 LAZERDECK_API int32_t lazerdeck_set_audio_device(int32_t device_index);
+
+/*
+ * Sets the engine's output sample rate (e.g. 44100, 48000, 96000). Like
+ * set_audio_device(), this is asynchronous: it queues a stream reopen on the
+ * engine thread and re-decodes loaded tracks at the new rate (resuming position
+ * + play state; loops/cues reset). Poll get_audio_config() for the applied rate.
+ */
+LAZERDECK_API int32_t lazerdeck_set_sample_rate(int32_t rate);
 
 /*
  * Waveform summary (precomputed peak/color "mips" for UI rendering).

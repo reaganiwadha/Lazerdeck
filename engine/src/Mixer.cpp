@@ -2,8 +2,22 @@
 #include "Vst3Runtime.hpp"
 #include "Logger.hpp"
 #include <algorithm>
+#include <cmath>
 
 namespace Lazerdeck {
+
+namespace {
+// Maps a 0..1 fader position to linear gain with a mixing-console / Ableton-style
+// taper: unity (0 dB) at the top, linear-in-dB down to a -60 dB working floor,
+// and true silence at the very bottom. Equal fader moves near the top make fine
+// adjustments around unity; the bottom of the travel drops steeply to silence.
+inline float faderGain(float pos) {
+    if (pos <= 0.0f) return 0.0f;
+    if (pos >= 1.0f) return 1.0f;
+    constexpr float minDb = -60.0f;            // gain floor of the working range
+    return std::pow(10.0f, (minDb * (1.0f - pos)) / 20.0f);
+}
+}  // namespace
 
 MixerChannel::MixerChannel(int sr) : sampleRate(sr), eq(sr) {
     procPtrs.resize(2);
@@ -59,10 +73,12 @@ void MixerChannel::process(const float* input, float* output, int frames) {
         }
     }
 
-    // Interleave and accumulate to output (mixing).
+    // Interleave and accumulate to output (mixing). `volume` is the 0..1 fader
+    // position; convert it to linear gain through the fader taper once per block.
+    const float g = faderGain(volume);
     for (int i = 0; i < frames; ++i) {
-        output[i * 2 + 0] += procBuffer[0][i] * volume;
-        output[i * 2 + 1] += procBuffer[1][i] * volume;
+        output[i * 2 + 0] += procBuffer[0][i] * g;
+        output[i * 2 + 1] += procBuffer[1][i] * g;
     }
 }
 

@@ -99,15 +99,16 @@ flutter:
   fonts:
     - family: ENFONIX
       fonts:
-        - asset: assets/fonts/enfonix.otf
+        - asset: assets/fonts/Ucka-Regular.otf
     - family: advercase
       fonts:
-        - asset: assets/fonts/advercase-regular.otf
-        - asset: assets/fonts/advercase-bold.otf
-          weight: 700
+        - asset: assets/fonts/Ucka-Regular.otf
     - family: bitroad
       fonts:
-        - asset: assets/fonts/advercase-regular.otf
+        - asset: assets/fonts/Ucka-Regular.otf
     - family: JetBrainsMono
       fonts:
-        - asset: assets/fonts/jetbrainsmono-bold.ttf
+        - asset: assets/fonts/Ucka-Regular.otf
+    - family: Ucka
+      fonts:
+        - asset: assets/fonts/Ucka-Regular.otf

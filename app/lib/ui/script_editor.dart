@@ -71,7 +71,9 @@ class EditorWindowApp extends StatelessWidget {
     return MaterialApp(
       title: 'LazerScript',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData.dark(useMaterial3: true).copyWith(
+      theme: ThemeData(
+        brightness: Brightness.dark,
+        useMaterial3: true,
         scaffoldBackgroundColor: const Color(0xFF101012),
         colorScheme: const ColorScheme.dark(
           primary: _accent,

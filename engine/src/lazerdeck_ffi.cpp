@@ -51,6 +51,11 @@ int32_t lazerdeck_get_sample_rate() {
     return g_engine->getSampleRate();
 }
 
+int32_t lazerdeck_get_master_deck() {
+    if (!g_engine) return 0;
+    return g_engine->getMasterDeck();
+}
+
 int32_t lazerdeck_get_deck_state(int32_t deck_idx, LazerDeckState* out) {
     if (!g_engine || !out) return 0;
     Deck* deck = g_engine->getDeck(deck_idx);
@@ -118,6 +123,23 @@ void lazerdeck_push_command(const char* cmd) {
     g_engine->pushCommand(std::string(cmd));
 }
 
+int32_t lazerdeck_control_start(int32_t port) {
+    if (!g_engine) return 0;
+    return g_engine->startControlServer(port) ? 1 : 0;
+}
+
+void lazerdeck_control_stop() {
+    if (g_engine) g_engine->stopControlServer();
+}
+
+int32_t lazerdeck_control_is_running() {
+    return (g_engine && g_engine->isControlServerRunning()) ? 1 : 0;
+}
+
+int32_t lazerdeck_control_get_port() {
+    return g_engine ? g_engine->getControlServerPort() : 0;
+}
+
 int32_t lazerdeck_get_audio_device_count() {
     if (!g_engine) return 0;
     return g_engine->getAudioDeviceCount();
@@ -158,6 +180,12 @@ int32_t lazerdeck_get_audio_config(LazerAudioConfig* out) {
 int32_t lazerdeck_set_audio_device(int32_t device_index) {
     if (!g_engine) return 0;
     g_engine->setAudioDevice(device_index);
+    return 1;
+}
+
+int32_t lazerdeck_set_sample_rate(int32_t rate) {
+    if (!g_engine) return 0;
+    g_engine->setSampleRate(rate);
     return 1;
 }
 

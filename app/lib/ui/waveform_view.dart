@@ -126,6 +126,11 @@ class _WaveformViewState extends State<WaveformView>
       ..beatOffset = s.beatOffset
       ..sampleRate = s.sampleRate
       ..loading = s.isLoading
+      ..loopActive = s.loopActive
+      ..loopStart = s.loopStart
+      ..loopEnd = s.loopEnd
+      ..recallStart = s.recallStart
+      ..recallEnd = s.recallEnd
       ..lanes = widget.engine.deckLanes(widget.deck)
       ..markers = widget.engine.deckMarkers(widget.deck)
       ..tick();
@@ -236,6 +241,13 @@ class _WaveModel extends ChangeNotifier {
   int sampleRate = 44100;
   double samplesPerPixel = 256;
   bool loading = false;
+  // A-B loop region, in source frames. The active loop is drawn solid; a
+  // recalled (exited) loop is drawn faint so it can be re-entered.
+  bool loopActive = false;
+  int loopStart = 0;
+  int loopEnd = 0;
+  int recallStart = 0;
+  int recallEnd = 0;
   List<AutomationLane> lanes = const [];
   List<DeckMarker> markers = const [];
 
@@ -248,6 +260,7 @@ class _WavePainter extends CustomPainter {
 
   static const _bg = Color(0xFF0A0A0A);
   static const _playheadColor = Color(0xFFFF3366);
+  static const _loopColor = Color(0xFFFF9800); // A-B loop region — orange
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -365,6 +378,7 @@ class _WavePainter extends CustomPainter {
     // to _overlayBeatColors, and add a _drawX pass here.
     final highlight = _overlayBeatColors();
     _drawBeatGrid(canvas, size, spp, half, highlight);
+    _drawLoop(canvas, size, spp, half);
     _drawMarkers(canvas, size, spp, half);
     _drawLanes(canvas, size, spp, half);
     _drawPlayhead(canvas, size, half);
@@ -555,6 +569,73 @@ class _WavePainter extends CustomPainter {
     final boxH = tp.height + padY * 2;
     final left = x - boxW / 2; // centered over the marker
     final top = h - 10 - boxH; // sit just above the bottom flag
+    final rect = Rect.fromLTWH(left, top, boxW, boxH);
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(rect, const Radius.circular(3)),
+      Paint()..color = color.withValues(alpha: 0.9),
+    );
+    tp.paint(canvas, Offset(left + padX, top + padY));
+  }
+
+  /// Draws the A-B loop region over the waveform. Loop points are in source
+  /// frames, so this works with or without a tempo grid. The active loop gets a
+  /// shaded band with solid A/B boundary lines; a recalled (exited) loop is
+  /// drawn as a faint dashed outline so it can be re-entered.
+  void _drawLoop(Canvas canvas, Size size, double spp, double half) {
+    final w = size.width;
+    final h = size.height;
+    double frameToX(double f) => half + (f - m.currentFrame) / spp;
+
+    void draw(int startFrame, int endFrame, bool active) {
+      if (endFrame <= startFrame) return;
+      final xA = frameToX(startFrame.toDouble());
+      final xB = frameToX(endFrame.toDouble());
+      if (xB < -40 || xA > w + 40) return; // fully off-screen
+
+      final color = active ? _loopColor : _loopColor.withValues(alpha: 0.5);
+
+      if (active) {
+        // Shaded band between A and B (clamped to the viewport).
+        final l = xA.clamp(0.0, w);
+        final r = xB.clamp(0.0, w);
+        if (r > l) {
+          canvas.drawRect(Rect.fromLTRB(l, 0, r, h),
+              Paint()..color = _loopColor.withValues(alpha: 0.12));
+        }
+      }
+
+      void boundary(double x, String label, bool anchorLeft) {
+        if (x < -2 || x > w + 2) return;
+        if (active) {
+          canvas.drawLine(Offset(x, 0), Offset(x, h),
+              Paint()..color = color..strokeWidth = 2);
+        } else {
+          _drawDashedVLine(canvas, x, 0, h, color);
+        }
+        _drawLoopLabel(canvas, x, label, color, anchorLeft: anchorLeft);
+      }
+
+      boundary(xA, 'A', true);
+      boundary(xB, 'B', false);
+    }
+
+    if (m.loopActive) {
+      draw(m.loopStart, m.loopEnd, true);
+    } else {
+      draw(m.recallStart, m.recallEnd, false);
+    }
+  }
+
+  void _drawLoopLabel(Canvas canvas, double x, String text, Color color,
+      {required bool anchorLeft}) {
+    final tp = _laneLabelPainter(text);
+    const padX = 4.0;
+    const padY = 1.5;
+    final boxW = tp.width + padX * 2;
+    final boxH = tp.height + padY * 2;
+    // A sits just left of its line, B just right, both below the beat-number row.
+    final left = anchorLeft ? x - boxW : x;
+    const top = 22.0;
     final rect = Rect.fromLTWH(left, top, boxW, boxH);
     canvas.drawRRect(
       RRect.fromRectAndRadius(rect, const Radius.circular(3)),

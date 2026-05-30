@@ -9,7 +9,9 @@
 cmake_minimum_required(VERSION 3.20)
 project(lazerdeck_engine LANGUAGES C CXX)
 
-set(CMAKE_CXX_STANDARD 17)
+# C++23 is required by Glaze (the JSON control-plane parser). MSVC compiles this
+# with /std:c++latest; /permissive- (set below) is also what Glaze wants.
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
@@ -116,6 +118,39 @@ FetchContent_Declare(soundtouch
     GIT_TAG        2.3.3)
 FetchContent_MakeAvailable(soundtouch)
 
+# ---------------------------------------------------------------------------
+# libsamplerate (static) — high-quality SINC resampler used at decode time to
+# convert source files to the engine's sample rate (see Deck::loaderWork).
+# Plain C, no FFTW dependency, builds cleanly on MSVC.
+# ---------------------------------------------------------------------------
+set(LIBSAMPLERATE_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(LIBSAMPLERATE_INSTALL  OFF CACHE BOOL "" FORCE)
+set(BUILD_TESTING          OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(libsamplerate
+    GIT_REPOSITORY https://github.com/libsndfile/libsamplerate.git
+    GIT_TAG        0.2.2
+    GIT_SHALLOW    TRUE)
+FetchContent_MakeAvailable(libsamplerate)
+
+# ---------------------------------------------------------------------------
+# HTTP/JSON control plane deps (header-only).
+#   * cpp-httplib — the localhost POST /action server (ControlServer).
+#   * Glaze       — compile-time-reflection JSON (de)serialization.
+# Both are INTERFACE targets: nothing extra is compiled here, they fold into the
+# engine TU that includes them (ControlServer.cpp).
+# ---------------------------------------------------------------------------
+FetchContent_Declare(httplib
+    GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
+    GIT_TAG        v0.46.0
+    GIT_SHALLOW    TRUE)
+FetchContent_MakeAvailable(httplib)
+
+FetchContent_Declare(glaze
+    GIT_REPOSITORY https://github.com/stephenberry/glaze.git
+    GIT_TAG        v7.7.1
+    GIT_SHALLOW    TRUE)
+FetchContent_MakeAvailable(glaze)
+
 # Spectral analysis uses the vendored src/SimpleFFT.hpp (no FFTW dependency).
 #
 # BPM + beat-phase detection uses vendored BTrack (GPL-3, third_party/btrack)
@@ -135,6 +170,7 @@ set(ENGINE_SRCS
     src/AudioEngine.cpp
     src/Mixer.cpp
     src/OSCHandler.cpp
+    src/ControlServer.cpp
     src/Vst3Runtime.cpp
     src/lazerdeck_ffi.cpp
     third_party/btrack/BTrack.cpp
@@ -159,7 +195,10 @@ target_compile_definitions(lazerdeck_engine PRIVATE USE_KISS_FFT)
 target_link_libraries(lazerdeck_engine PRIVATE
     rubberband_lib
     ${PA_LIB}
-    SoundTouch)
+    SoundTouch
+    samplerate
+    httplib::httplib
+    glaze::glaze)
 
 target_compile_definitions(lazerdeck_engine PRIVATE LAZERDECK_BUILD_DLL)
 

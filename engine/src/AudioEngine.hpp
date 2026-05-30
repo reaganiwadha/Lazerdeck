@@ -43,7 +43,9 @@ public:
     // Switch output to `deviceIndex`, reopening the stream in place. MUST be
     // called from the engine thread (not the audio callback). Decks/mixer are
     // retargeted to the new device's sample rate. Returns true on success.
-    bool reopen(int deviceIndex);
+    // When `requestedRate > 0`, the stream is (re)opened at that sample rate
+    // (subject to the device's supported-rate fallback); 0 keeps the current.
+    bool reopen(int deviceIndex, int requestedRate = 0);
 
     // Re-enumerates output-capable devices, caches them, and returns the list.
     std::vector<AudioDeviceInfo> refreshDevices();

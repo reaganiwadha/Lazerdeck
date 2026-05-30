@@ -158,6 +158,8 @@ class LazerdeckBindings {
             lib.lookupFunction<_IntC, _IntDart>('lazerdeck_get_deck_count'),
         getSampleRate =
             lib.lookupFunction<_IntC, _IntDart>('lazerdeck_get_sample_rate'),
+        getMasterDeck =
+            lib.lookupFunction<_IntC, _IntDart>('lazerdeck_get_master_deck'),
         getDeckState = lib.lookupFunction<_DeckStateC, _DeckStateDart>(
             'lazerdeck_get_deck_state'),
         loadFile =
@@ -178,15 +180,26 @@ class LazerdeckBindings {
             'lazerdeck_get_audio_config'),
         setAudioDevice = lib.lookupFunction<_SetDevC, _SetDevDart>(
             'lazerdeck_set_audio_device'),
+        setSampleRate = lib.lookupFunction<_SetDevC, _SetDevDart>(
+            'lazerdeck_set_sample_rate'),
         getLanes = lib.lookupFunction<_GetLanesC, _GetLanesDart>(
             'lazerdeck_get_lanes'),
         getMarkers = lib.lookupFunction<_GetMarkersC, _GetMarkersDart>(
-            'lazerdeck_get_markers');
+            'lazerdeck_get_markers'),
+        controlStart = lib.lookupFunction<_SetDevC, _SetDevDart>(
+            'lazerdeck_control_start'),
+        controlStop =
+            lib.lookupFunction<_VoidC, _VoidDart>('lazerdeck_control_stop'),
+        controlIsRunning = lib.lookupFunction<_IntC, _IntDart>(
+            'lazerdeck_control_is_running'),
+        controlGetPort = lib.lookupFunction<_IntC, _IntDart>(
+            'lazerdeck_control_get_port');
 
   final _InitDart init;
   final _VoidDart shutdown;
   final _IntDart getDeckCount;
   final _IntDart getSampleRate;
+  final _IntDart getMasterDeck;
   final _DeckStateDart getDeckState;
   final _LoadDart loadFile;
   final _DeckCmdDart play;
@@ -198,8 +211,13 @@ class LazerdeckBindings {
   final _AudioDevDart getAudioDevice;
   final _AudioCfgDart getAudioConfig;
   final _SetDevDart setAudioDevice;
+  final _SetDevDart setSampleRate;
   final _GetLanesDart getLanes;
   final _GetMarkersDart getMarkers;
+  final _SetDevDart controlStart;
+  final _VoidDart controlStop;
+  final _IntDart controlIsRunning;
+  final _IntDart controlGetPort;
 
   /// Opens the engine library bundled next to the executable.
   static LazerdeckBindings open() {

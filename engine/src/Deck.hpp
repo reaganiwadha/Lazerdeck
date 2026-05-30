@@ -29,7 +29,12 @@ public:
     Deck(int sampleRate = 44100);
     ~Deck();
 
-    bool load(const std::string& filepath, AnalysisDB* db = nullptr);
+    // Loads (decodes + resamples + analyzes) a file. When `resumeSeconds >= 0`
+    // the playhead resumes near that source-time position once enough frames
+    // have streamed in, and playback restarts if `resumePlaying` is set — used
+    // when the engine's output sample rate changes (see Engine::setSampleRate).
+    bool load(const std::string& filepath, AnalysisDB* db = nullptr,
+              double resumeSeconds = -1.0, bool resumePlaying = false);
     void saveAnalysis(AnalysisDB& db);
     // Drops this track's cached analysis and runs BPM detection again.
     void reanalyze(AnalysisDB& db);
@@ -235,6 +240,12 @@ public:
 
         std::string currentFilepath;
         std::string currentFileHash = "";
+
+        // Resume target applied once by loaderWork after the buffer is sized
+        // (set by load() before the loader thread starts, so there's no race).
+        // < 0 means "no resume" (start at frame 0). See Engine::setSampleRate.
+        double pendingResumeSeconds = -1.0;
+        bool   pendingResumePlaying = false;
 
     
 

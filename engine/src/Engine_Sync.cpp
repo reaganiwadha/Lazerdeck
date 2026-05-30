@@ -53,6 +53,53 @@ constexpr double kMaxSpeed      = 4.0;
 
 } // namespace
 
+void Engine::setMasterDeck(int deck) {
+    if (deck >= 0 && deck < (int)decks.size()) masterDeck.store(deck);
+}
+
+void Engine::setSyncWanted(int deck, bool wanted) {
+    if (deck < 0 || deck >= (int)decks.size()) return;
+    if ((int)syncWanted.size() != (int)decks.size())
+        syncWanted.assign(decks.size(), false);
+    syncWanted[deck] = wanted;
+}
+
+// Elect the master and reconcile every deck's effective sync state. The master
+// is the tempo reference: it always tracks a *playing* deck (so pausing or
+// unloading the current master promotes it to whatever is still playing) and it
+// never follows anything itself. Decks that want sync (syncWanted) and aren't
+// the master follow the master; their intent survives master role swaps.
+void Engine::updateMaster() {
+    if (decks.empty()) return;
+    if ((int)syncWanted.size() != (int)decks.size())
+        syncWanted.assign(decks.size(), false);
+
+    int master = masterDeck.load();
+    if (master < 0 || master >= (int)decks.size()) master = 0;
+
+    // Promote the master to a playing deck when the current one isn't playing.
+    // (When nothing is playing, keep the current master so it's stable.)
+    if (!decks[master]->isPlaying()) {
+        for (int i = 0; i < (int)decks.size(); ++i) {
+            if (decks[i]->isPlaying()) { master = i; break; }
+        }
+    }
+    masterDeck.store(master);
+
+    // Reconcile effective follow state from intent + master.
+    for (int i = 0; i < (int)decks.size(); ++i) {
+        if (i == master) {
+            // The reference deck never follows, whatever its own intent.
+            if (decks[i]->isSyncActive()) decks[i]->setSync(false);
+        } else if (syncWanted[i]) {
+            if (!decks[i]->isSyncActive() || decks[i]->getSyncSource() != master)
+                decks[i]->setSync(true, master);
+        } else {
+            if (decks[i]->isSyncActive()) decks[i]->setSync(false);
+        }
+    }
+}
+
 void Engine::updateSync() {
     for (size_t i = 0; i < decks.size(); ++i) {
         Deck* follower = decks[i].get();

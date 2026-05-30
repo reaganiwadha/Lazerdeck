@@ -2,6 +2,7 @@
 #include <iostream>
 #include "Logger.hpp"
 #include "OSCHandler.hpp"
+#include "ControlServer.hpp"
 #include "Vst3Runtime.hpp"
 #include <filesystem>
 #include <thread>
@@ -42,6 +43,8 @@ bool Engine::init(int numDecks) {
     }
 
     mixer = std::make_unique<Lazerdeck::Mixer>(numDecks, sampleRate);
+    syncWanted.assign(numDecks, false);
+    masterDeck.store(0);
 
     if (!audioEngine.init(deckPtrs, mixer.get(), sampleRate, 128)) { // 128 frames (~2.9ms)
         Logger::error("AudioEngine initialization failed");
@@ -59,6 +62,12 @@ bool Engine::init(int numDecks) {
 
     oscHandler = std::make_unique<OSCHandler>(this, 9000);
     oscHandler->start();
+
+    // JSON control plane: external REPL clients POST /action here (see Control.hpp).
+    // Try the default port at startup; a busy port is non-fatal — the host can
+    // start it on another port from the settings UI.
+    controlServer = std::make_unique<ControlServer>(this, 8203);
+    controlServer->start(controlServer->port());
 
     // Optional VST3 support: load the separate plugin library if present.
     Lazerdeck::Vst3Runtime::load();
@@ -79,12 +88,107 @@ void Engine::run() {
         checkTriggers();       // beat-synced cue triggers (typed actions)
         checkScriptTriggers(); // general `when hit B do (cmd)` triggers
         applyAutomation();     // drive automated params from their envelopes
+        updateMaster();        // elect master + reconcile sync intent
         updateSync();          // deck tempo/phase sync
 
         std::this_thread::sleep_for(milliseconds(5));
     }
 
     shutdown();
+}
+
+// ---------------------------------------------------------------------------
+// Structured verb helpers. Each performs the immediate effect of one verb on the
+// engine thread; both the legacy text parser (processCommands) and the JSON
+// dispatcher (dispatchAction) route through them. Decks are 0-based; beats are
+// 1-based (beat 1 = grid origin), matching the UI grid / script convention.
+// ---------------------------------------------------------------------------
+bool Engine::frameForBeat(int deck, double scriptBeat, uint64_t& outFrame) {
+    Deck* d = getDeck(deck);
+    if (!d) return false;
+    float bpm = d->getBPM();
+    if (!(bpm > 0.0f)) return false;
+    double framesPerBeat = (double)sampleRate * 60.0 / (double)bpm;
+    outFrame = (uint64_t)std::max(0.0, (scriptBeat - 1.0) * framesPerBeat +
+                                       (double)d->getBeatOffset());
+    return true;
+}
+
+void Engine::actLoad(int deck, const std::string& path) {
+    Deck* d = getDeck(deck);
+    if (!d || path.empty()) return;
+    clearDeckScript(deck);          // drop old lanes/triggers
+    d->load(path, &analysisDB);
+}
+
+void Engine::actPlay(int deck)  { if (Deck* d = getDeck(deck)) d->play(); }
+void Engine::actPause(int deck) { if (Deck* d = getDeck(deck)) d->pause(); }
+void Engine::actStop(int deck)  { if (Deck* d = getDeck(deck)) { d->pause(); d->setFrame(0); } }
+
+void Engine::actSeekSeconds(int deck, double seconds) {
+    if (Deck* d = getDeck(deck)) d->seek((int64_t)(seconds * sampleRate));
+}
+
+void Engine::actSpeed(int deck, double mult) {
+    if (Deck* d = getDeck(deck)) d->setSpeed(mult);
+}
+
+void Engine::actPlayjump(int deck, double beat) {
+    Deck* d = getDeck(deck);
+    uint64_t frame;
+    if (d && frameForBeat(deck, beat, frame)) { d->setFrame(frame); d->play(); }
+}
+
+void Engine::actBpm(int deck, double bpm) {
+    Deck* d = getDeck(deck);
+    if (d && bpm > 0.0) { d->setBpmManual((float)bpm); d->saveAnalysis(analysisDB); }
+}
+
+void Engine::actOffset(int deck, double frames) {
+    Deck* d = getDeck(deck);
+    if (d) { d->setBeatOffset((float)frames); d->saveAnalysis(analysisDB); }
+}
+
+void Engine::actNudgeOffset(int deck, double delta) {
+    Deck* d = getDeck(deck);
+    if (d) { d->nudgeBeatOffset((float)delta); d->saveAnalysis(analysisDB); }
+}
+
+void Engine::actReanalyze(int deck) {
+    if (Deck* d = getDeck(deck)) d->reanalyze(analysisDB);
+}
+
+void Engine::actMetronome(int deck, bool on) {
+    if (Deck* d = getDeck(deck)) d->setMetronome(on);
+}
+
+void Engine::actSync(int deck, bool on) {
+    if (deck < 0 || deck >= (int)decks.size()) return;
+    setSyncWanted(deck, on);
+    updateMaster(); // reconcile immediately, don't wait a tick
+}
+
+void Engine::actMaster(int deck) {
+    if (deck < 0 || deck >= (int)decks.size()) return;
+    setMasterDeck(deck);
+    updateMaster();
+}
+
+void Engine::actAlign(int subj, double subjBeat, int ref, double refBeat) {
+    Deck* S = getDeck(subj);
+    if (!S || getDeck(ref) == nullptr) return;
+    double bpmS = S->getBPM();
+    if (!(bpmS > 0.0)) return;
+    double rNow = deckBeat(ref);            // reference's current 0-based beat
+    if (std::isnan(rNow)) return;
+    // Tempo-locked, beat_ref - beat_subj is constant; the 1-based vs 0-based
+    // convention cancels in the difference, so subjBeat/refBeat pass through raw.
+    double sNew = rNow - (refBeat - subjBeat);   // subject's desired beat now
+    double framesPerBeat = (double)sampleRate * 60.0 / bpmS;
+    double frame = sNew * framesPerBeat + (double)S->getBeatOffset();
+    S->setFrame((uint64_t)std::max(0.0, frame));
+    Logger::info("align: D" + std::to_string(subj + 1) + " beat " + formatBeat(subjBeat) +
+                 " -> D" + std::to_string(ref + 1) + " beat " + formatBeat(refBeat));
 }
 
 void Engine::processCommands() {
@@ -153,33 +257,27 @@ void Engine::processCommands() {
                                              " hits beat " + std::to_string(srcBeat));
                             }
                         } else {
-                            decks[deckIdx]->play();
+                            actPlay(deckIdx);
                         }
                     }
-                    else if (action == "pause") decks[deckIdx]->pause();
-                    else if (action == "stop") { decks[deckIdx]->pause(); decks[deckIdx]->setFrame(0); }
+                    else if (action == "pause") actPause(deckIdx);
+                    else if (action == "stop") actStop(deckIdx);
                     else if (action == "load") {
                         std::string remaining;
                         std::getline(iss, remaining);
                         size_t first = remaining.find_first_not_of(" \t\"");
                         if (std::string::npos != first) {
                             size_t last = remaining.find_last_not_of(" \t\"");
-                            std::string path = remaining.substr(first, (last - first + 1));
-                            clearDeckScript(deckIdx); // drop old lanes/triggers
-                            decks[deckIdx]->load(path, &analysisDB);
+                            actLoad(deckIdx, remaining.substr(first, (last - first + 1)));
                         }
                     }
                     else if (action == "seek") {
                         float seconds;
-                        if (iss >> seconds) {
-                            decks[deckIdx]->seek((int64_t)(seconds * sampleRate));
-                        }
+                        if (iss >> seconds) actSeekSeconds(deckIdx, seconds);
                     }
                     else if (action == "speed") {
                         double speed;
-                        if (iss >> speed) {
-                            decks[deckIdx]->setSpeed(speed);
-                        }
+                        if (iss >> speed) actSpeed(deckIdx, speed);
                     }
                     else if (action == "speed_up") {
                         decks[deckIdx]->increaseSpeed();
@@ -188,7 +286,7 @@ void Engine::processCommands() {
                         decks[deckIdx]->decreaseSpeed();
                     }
                     else if (action == "speed_reset") {
-                        decks[deckIdx]->setSpeed(1.0);
+                        actSpeed(deckIdx, 1.0);
                     }
                     // Automatable params (raw engine units, 0..1; 0.5 = unity).
                     // Three forms:
@@ -265,15 +363,7 @@ void Engine::processCommands() {
                                                  " hits beat " + std::to_string(srcBeat));
                                 }
                             } else {
-                                float bpm = decks[deckIdx]->getBPM();
-                                if (bpm > 0) {
-                                    float offset = decks[deckIdx]->getBeatOffset();
-                                    double framesPerBeat = (double)sampleRate * 60.0 / (double)bpm;
-                                    // Beats are 1-based (beat 1 = grid origin).
-                                    uint64_t frame = (uint64_t)std::max(0.0, (tbeat - 1.0) * framesPerBeat + offset);
-                                    decks[deckIdx]->setFrame(frame);
-                                    decks[deckIdx]->play();
-                                }
+                                actPlayjump(deckIdx, tbeat);
                             }
                         }
                     }
@@ -296,48 +386,37 @@ void Engine::processCommands() {
                     }
                     else if (action == "bpm") {
                         float value;
-                        if (iss >> value && value > 0.0f) {
-                            decks[deckIdx]->setBpmManual(value);
-                            decks[deckIdx]->saveAnalysis(analysisDB);
-                        }
+                        if (iss >> value && value > 0.0f) actBpm(deckIdx, value);
                     }
                     else if (action == "offset") {
                         float frames;
-                        if (iss >> frames) {
-                            decks[deckIdx]->setBeatOffset(frames);
-                            decks[deckIdx]->saveAnalysis(analysisDB);
-                        }
+                        if (iss >> frames) actOffset(deckIdx, frames);
                     }
                     else if (action == "nudge_offset") {
                         float delta;
-                        if (iss >> delta) {
-                            decks[deckIdx]->nudgeBeatOffset(delta);
-                            decks[deckIdx]->saveAnalysis(analysisDB);
-                        }
+                        if (iss >> delta) actNudgeOffset(deckIdx, delta);
                     }
                     else if (action == "reanalyze") {
-                        decks[deckIdx]->reanalyze(analysisDB);
+                        actReanalyze(deckIdx);
                     }
                     else if (action == "metronome") {
                         int on;
-                        if (iss >> on) {
-                            decks[deckIdx]->setMetronome(on != 0);
-                        }
+                        if (iss >> on) actMetronome(deckIdx, on != 0);
                     }
                     else if (action == "metronome_tick") {
                         // One-shot click for the Tap Tempo wizard.
                         decks[deckIdx]->requestMetronomeTick();
                     }
                     else if (action == "sync") {
+                        // Now a per-deck sync *intent* toggle; the engine elects
+                        // the master and points followers at it (see
+                        // updateMaster). Any source >= 1 means "on", 0 = off; the
+                        // specific source index is ignored (always the master).
                         int sourceIdx;
-                        if (iss >> sourceIdx) {
-                            // 1-based index from user
-                            if (sourceIdx >= 1 && sourceIdx <= (int)decks.size()) {
-                                decks[deckIdx]->setSync(true, sourceIdx - 1);
-                            } else if (sourceIdx == 0) {
-                                decks[deckIdx]->setSync(false);
-                            }
-                        }
+                        if (iss >> sourceIdx) actSync(deckIdx, sourceIdx != 0);
+                    }
+                    else if (action == "master") {
+                        actMaster(deckIdx);
                     }
                     else if (action == "loop") {
                         float startBeat, endBeat;
@@ -446,6 +525,43 @@ void Engine::setAudioDevice(int deviceIndex) {
     });
 }
 
+void Engine::setSampleRate(int rate) {
+    // Serialized on the engine thread, like setAudioDevice — never races the
+    // audio callback or command processing.
+    queueTask([this, rate]() {
+        if (rate <= 0 || rate == sampleRate) return;
+
+        // Capture each deck's resume state before we retarget anything.
+        // currentInputTime is source-track seconds (sample-rate invariant).
+        struct Resume { std::string file; double sec; bool playing; };
+        std::vector<Resume> resume(decks.size());
+        for (size_t i = 0; i < decks.size(); ++i) {
+            resume[i] = { decks[i]->getCurrentFilepath(),
+                          decks[i]->getCurrentInputTime(),
+                          decks[i]->isPlaying() };
+        }
+
+        const int oldRate = sampleRate;
+        const bool ok = audioEngine.reopen(audioEngine.getCurrentDevice(), rate);
+        const int actual = ok ? audioEngine.getActualSampleRate() : rate;
+        if (actual == oldRate) {
+            Logger::info("Sample rate unchanged at " + std::to_string(actual) + " Hz");
+            return;
+        }
+
+        sampleRate = actual;
+        if (mixer) mixer->setSampleRate(actual);
+        for (auto& d : decks) d->updateSampleRate(actual);
+
+        // Re-decode loaded tracks at the new rate, resuming where they were.
+        for (size_t i = 0; i < decks.size(); ++i) {
+            if (resume[i].file.empty()) continue;
+            decks[i]->load(resume[i].file, &analysisDB, resume[i].sec, resume[i].playing);
+        }
+        Logger::info("Engine sample rate set to " + std::to_string(actual) + " Hz");
+    });
+}
+
 void Engine::queueTask(std::function<void()> task) {
     std::lock_guard<std::mutex> lock(taskMutex);
     taskQueue.push_back(task);
@@ -455,12 +571,104 @@ void Engine::pushCommand(const std::string& cmd) {
     commandQueue.push(cmd);
 }
 
+namespace {
+// Parses a JSON deck reference ("d1", "D2", or a bare "1") to a 0-based index,
+// or -1 if it isn't one. The wire form is 1-based, like the script convention.
+int parseDeckName(const std::string& s) {
+    if (s.empty()) return -1;
+    size_t i = (s[0] == 'd' || s[0] == 'D') ? 1 : 0;
+    try { return std::stoi(s.substr(i)) - 1; } catch (...) { return -1; }
+}
+} // namespace
+
+bool Engine::startControlServer(int port) {
+    return controlServer ? controlServer->start(port) : false;
+}
+
+void Engine::stopControlServer() {
+    if (controlServer) controlServer->stop();
+}
+
+bool Engine::isControlServerRunning() const {
+    return controlServer && controlServer->isRunning();
+}
+
+int Engine::getControlServerPort() const {
+    return controlServer ? controlServer->port() : 0;
+}
+
+void Engine::submitActions(const ControlRequest& req) {
+    // Parse happens on the HTTP thread; mutation must happen on the engine thread.
+    for (const ControlAction& a : req.actions) {
+        queueTask([this, a]() { dispatchAction(a); });
+    }
+}
+
+void Engine::dispatchAction(const ControlAction& a) {
+    const int deck = parseDeckName(a.deck);
+
+    // align is cross-deck and doesn't schedule on a single deck's beat.
+    if (a.action == "align") {
+        const int ref = a.reference ? parseDeckName(*a.reference) : -1;
+        if (deck < 0 || ref < 0) return;
+        actAlign(deck, a.subjectBeat.value_or(1.0), ref, a.referenceBeat.value_or(1.0));
+        return;
+    }
+
+    if (deck < 0 || deck >= (int)decks.size()) return;
+
+    // The immediate effect of this action, captured so it can run now or later.
+    std::function<void()> effect;
+    const std::string& v = a.action;
+    if      (v == "play")         effect = [this, deck]{ actPlay(deck); };
+    else if (v == "pause")        effect = [this, deck]{ actPause(deck); };
+    else if (v == "stop")         effect = [this, deck]{ actStop(deck); };
+    else if (v == "load")         { if (a.path) { std::string p = *a.path; effect = [this, deck, p]{ actLoad(deck, p); }; } }
+    else if (v == "seek")         { double s = a.value.value_or(0.0); effect = [this, deck, s]{ actSeekSeconds(deck, s); }; }
+    else if (v == "speed")        { double m = a.speed.value_or(1.0); effect = [this, deck, m]{ actSpeed(deck, m); }; }
+    else if (v == "speed_reset")  effect = [this, deck]{ actSpeed(deck, 1.0); };
+    else if (v == "playjump")     { double b = a.beat.value_or(1.0); effect = [this, deck, b]{ actPlayjump(deck, b); }; }
+    else if (v == "bpm")          { double b = a.value.value_or(0.0); effect = [this, deck, b]{ actBpm(deck, b); }; }
+    else if (v == "offset")       { double f = a.value.value_or(0.0); effect = [this, deck, f]{ actOffset(deck, f); }; }
+    else if (v == "nudge_offset") { double d = a.value.value_or(0.0); effect = [this, deck, d]{ actNudgeOffset(deck, d); }; }
+    else if (v == "reanalyze")    effect = [this, deck]{ actReanalyze(deck); };
+    else if (v == "metronome")    { bool on = a.on.value_or(true); effect = [this, deck, on]{ actMetronome(deck, on); }; }
+    else if (v == "sync")         { bool on = a.on.value_or(true); effect = [this, deck, on]{ actSync(deck, on); }; }
+    else if (v == "master")       effect = [this, deck]{ actMaster(deck); };
+    else if (v == "eq_low" || v == "eq_mid" || v == "eq_high" || v == "volume") {
+        std::string canon = v; double val = a.value.value_or(0.5);
+        effect = [this, deck, canon, val]{ clearLane(deck, canon); setDeckParam(deck, canon, (float)val); };
+    }
+
+    if (!effect) {
+        Logger::error("dispatchAction: unknown/incomplete action '" + v + "'");
+        return;
+    }
+
+    if (a.onBeat) {
+        // Defer until `deck` reaches the given (1-based) beat. Reuses the same
+        // one-shot trigger machinery as the legacy `when hit … do` grammar so the
+        // waveform overlay (snapshotMarkers) draws it too.
+        ScriptTrigger t;
+        t.deck = deck;
+        t.beat = *a.onBeat - 1.0;   // 1-based wire -> 0-based runtime
+        t.fn = std::move(effect);
+        t.kind = MARKER_GENERIC;
+        t.targetDeck = deck;
+        t.label = v;
+        addScriptTrigger(std::move(t));
+    } else {
+        effect();
+    }
+}
+
 void Engine::stop() {
     running = false;
 }
 
 void Engine::shutdown() {
     if (vstScanThread.joinable()) vstScanThread.join();
+    if (controlServer) controlServer->stop();
     if (oscHandler) oscHandler->stop();
     audioEngine.stop();
     if (mixer) {
@@ -727,7 +935,8 @@ void Engine::checkScriptTriggers() {
             t.fired = true;
             Logger::info("ScriptTrigger fired on deck " + std::to_string(t.deck) +
                          " @ beat " + std::to_string(t.beat) + ": " + t.command);
-            pushCommand(t.command); // re-enters the parser next tick
+            if (t.fn) t.fn();           // structured effect (JSON path)
+            else pushCommand(t.command); // legacy: re-enters the parser next tick
         } else if (t.fired && beat < t.beat - 1.0) {
             t.fired = false; // scrubbed back before the trigger; re-arm
         }

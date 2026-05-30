@@ -91,7 +91,9 @@ class _LazerdeckAppState extends State<LazerdeckApp> with WidgetsBindingObserver
     return MaterialApp(
       title: 'Lazerdeck',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData.dark(useMaterial3: true).copyWith(
+      theme: ThemeData(
+        brightness: Brightness.dark,
+        useMaterial3: true,
         scaffoldBackgroundColor: Colors.black,
         colorScheme: const ColorScheme.dark(
           primary: Color(0xFFE0344B), // minimal accent: tape-deck REC red

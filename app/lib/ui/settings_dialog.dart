@@ -32,18 +32,50 @@ class _AudioSettingsState extends State<_AudioSettings> {
   List<AudioDevice> _devices = const [];
   AudioConfig? _config;
   int? _switchingTo; // device index a switch is in flight to
+  int? _switchingRate; // sample rate a switch is in flight to
   Timer? _confirmPoll;
+
+  ControlServerStatus _control =
+      const ControlServerStatus(running: false, port: 0);
+  final TextEditingController _portCtrl = TextEditingController();
+  String? _controlError; // last bind failure message, cleared on success
 
   @override
   void initState() {
     super.initState();
     _reload();
+    _control = widget.engine.controlServerStatus();
+    _portCtrl.text =
+        (_control.port == 0 ? LazerdeckEngine.defaultControlPort : _control.port)
+            .toString();
   }
 
   void _reload() {
     setState(() {
       _devices = widget.engine.audioDevices();
       _config = widget.engine.audioConfig();
+      _control = widget.engine.controlServerStatus();
+    });
+  }
+
+  void _startControl() {
+    final port = int.tryParse(_portCtrl.text.trim());
+    if (port == null || port < 1 || port > 65535) {
+      setState(() => _controlError = 'Enter a port between 1 and 65535');
+      return;
+    }
+    final ok = widget.engine.startControlServer(port);
+    setState(() {
+      _control = widget.engine.controlServerStatus();
+      _controlError = ok ? null : 'Port $port is unavailable — try another';
+    });
+  }
+
+  void _stopControl() {
+    widget.engine.stopControlServer();
+    setState(() {
+      _control = widget.engine.controlServerStatus();
+      _controlError = null;
     });
   }
 
@@ -75,9 +107,40 @@ class _AudioSettingsState extends State<_AudioSettings> {
     });
   }
 
+  void _selectRate(int rate) {
+    if (rate == _config?.sampleRate) return;
+    final oldRate = _config?.sampleRate;
+    widget.engine.setSampleRate(rate);
+    setState(() => _switchingRate = rate);
+
+    // The reopen + track re-decode runs on the engine thread; the config's
+    // sample rate flips as soon as the stream reopens. Poll until it changes
+    // (the device may grant a nearby rate instead) or we give up after ~3s.
+    _confirmPoll?.cancel();
+    var ticks = 0;
+    _confirmPoll = Timer.periodic(const Duration(milliseconds: 150), (t) {
+      ticks++;
+      final cfg = widget.engine.audioConfig();
+      final done = cfg?.sampleRate == rate || cfg?.sampleRate != oldRate;
+      if (done || ticks > 20) {
+        t.cancel();
+        if (mounted) {
+          setState(() {
+            _switchingRate = null;
+            _config = cfg;
+            _devices = widget.engine.audioDevices();
+          });
+        }
+      } else if (mounted) {
+        setState(() => _config = cfg);
+      }
+    });
+  }
+
   @override
   void dispose() {
     _confirmPoll?.cancel();
+    _portCtrl.dispose();
     super.dispose();
   }
 
@@ -113,6 +176,47 @@ class _AudioSettingsState extends State<_AudioSettings> {
           ),
         ),
         if (cfg != null) _ConfigSummary(config: cfg),
+        const Divider(height: 1),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 14, 20, 6),
+          child: Text('SAMPLE RATE',
+              style: TextStyle(
+                  color: cs.primary,
+                  fontSize: 12,
+                  letterSpacing: 1.5,
+                  fontWeight: FontWeight.bold)),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
+          child: Row(
+            children: [
+              for (final rate in LazerdeckEngine.supportedSampleRates)
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: ChoiceChip(
+                    label: Text('${(rate / 1000).toStringAsFixed(1)} kHz'),
+                    selected: cfg?.sampleRate == rate,
+                    onSelected: _switchingRate != null
+                        ? null
+                        : (_) => _selectRate(rate),
+                  ),
+                ),
+              if (_switchingRate != null)
+                const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+            ],
+          ),
+        ),
+        const Padding(
+          padding: EdgeInsets.fromLTRB(20, 0, 20, 12),
+          child: Text('Changing the rate reloads playing tracks.',
+              style: TextStyle(fontSize: 11, color: Colors.white38)),
+        ),
+        const Divider(height: 1),
+        _controlSection(cs),
         const Divider(height: 1),
         Padding(
           padding: const EdgeInsets.fromLTRB(20, 14, 20, 6),
@@ -163,6 +267,77 @@ class _AudioSettingsState extends State<_AudioSettings> {
         ),
         const SizedBox(height: 8),
       ],
+    );
+  }
+
+  Widget _controlSection(ColorScheme cs) {
+    final running = _control.running;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 14, 20, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text('CONTROL SERVER',
+                  style: TextStyle(
+                      color: cs.primary,
+                      fontSize: 12,
+                      letterSpacing: 1.5,
+                      fontWeight: FontWeight.bold)),
+              const Spacer(),
+              Icon(running ? Icons.circle : Icons.circle_outlined,
+                  size: 12,
+                  color: running ? Colors.greenAccent : Colors.white38),
+              const SizedBox(width: 6),
+              Text(
+                running ? 'Running on :${_control.port}' : 'Stopped',
+                style: TextStyle(
+                    fontSize: 12,
+                    color: running ? Colors.greenAccent : Colors.white54),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          const Text('HTTP/JSON endpoint at POST /action for external control.',
+              style: TextStyle(fontSize: 11, color: Colors.white38)),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              SizedBox(
+                width: 110,
+                child: TextField(
+                  controller: _portCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'Port',
+                    isDense: true,
+                    border: OutlineInputBorder(),
+                  ),
+                  onSubmitted: (_) => _startControl(),
+                ),
+              ),
+              const SizedBox(width: 12),
+              FilledButton.icon(
+                onPressed: _startControl,
+                icon: const Icon(Icons.play_arrow, size: 18),
+                label: Text(running ? 'Restart' : 'Start'),
+              ),
+              const SizedBox(width: 8),
+              OutlinedButton.icon(
+                onPressed: running ? _stopControl : null,
+                icon: const Icon(Icons.stop, size: 18),
+                label: const Text('Stop'),
+              ),
+            ],
+          ),
+          if (_controlError != null) ...[
+            const SizedBox(height: 8),
+            Text(_controlError!,
+                style: TextStyle(fontSize: 12, color: cs.error)),
+          ],
+        ],
+      ),
     );
   }
 }

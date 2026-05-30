@@ -204,6 +204,14 @@ class AudioConfig {
   });
 }
 
+/// Snapshot of the HTTP/JSON control server's state. [running] is whether it is
+/// currently serving; [port] is the last requested/bound port (127.0.0.1).
+class ControlServerStatus {
+  final bool running;
+  final int port;
+  const ControlServerStatus({required this.running, required this.port});
+}
+
 /// Owns the native engine instance for the app's lifetime.
 class LazerdeckEngine {
   final LazerdeckBindings _b;
@@ -332,11 +340,21 @@ class LazerdeckEngine {
   void clearLoop(int deck) => pushCommand('${_d(deck)} loop_clear');
   void reloop(int deck) => pushCommand('${_d(deck)} reloop');
 
-  /// Set the beat-sync source deck (0-based) for this deck, or -1 to disable.
+  /// Toggles this deck's beat-sync intent. The engine elects the master deck and
+  /// points followers at it, so [sourceDeck] only signals on (>= 0) vs off (-1);
+  /// the actual source is always the current master.
   void setSync(int deck, int sourceDeck) {
     final arg = sourceDeck >= 0 ? sourceDeck + 1 : 0;
     pushCommand('${_d(deck)} sync $arg');
   }
+
+  /// The deck index currently elected as the beat-sync master (auto-promotes to
+  /// a playing deck; pausing/unloading the master hands it to what's playing).
+  int masterDeck() => _initialized ? _b.getMasterDeck() : 0;
+
+  /// Manually designate [deck] as the beat-sync master. Holds only while that
+  /// deck keeps playing — the engine re-promotes to a playing deck otherwise.
+  void setMaster(int deck) => pushCommand('${_d(deck)} master');
 
   void pushCommand(String cmd) {
     final p = cmd.toNativeUtf8();
@@ -547,6 +565,46 @@ class LazerdeckEngine {
   void switchAudioDevice(int deviceIndex) {
     if (!_initialized) return;
     _b.setAudioDevice(deviceIndex);
+  }
+
+  /// Sample rates the settings UI offers. The engine falls back to the nearest
+  /// rate the device actually supports, so these are requests, not guarantees.
+  static const List<int> supportedSampleRates = [44100, 48000, 88200, 96000];
+
+  /// Asynchronously sets the engine's output sample rate. The engine reopens the
+  /// stream and re-decodes loaded tracks at the new rate on its own thread
+  /// (position + play state preserved; loops/cues reset). Poll [audioConfig].
+  void setSampleRate(int rate) {
+    if (!_initialized) return;
+    _b.setSampleRate(rate);
+  }
+
+  /// Default port the engine tries to bind the JSON control server to at startup.
+  static const int defaultControlPort = 8203;
+
+  /// Live state of the HTTP/JSON control server (see [controlServerStatus]).
+  ControlServerStatus controlServerStatus() {
+    if (!_initialized) {
+      return const ControlServerStatus(running: false, port: defaultControlPort);
+    }
+    return ControlServerStatus(
+      running: _b.controlIsRunning() == 1,
+      port: _b.controlGetPort(),
+    );
+  }
+
+  /// Binds the control server to [port] on 127.0.0.1 (restarting it if already
+  /// running). Returns true iff the bind succeeded; false means the port is busy
+  /// — try another. Non-fatal either way.
+  bool startControlServer(int port) {
+    if (!_initialized) return false;
+    return _b.controlStart(port) == 1;
+  }
+
+  /// Stops the control server.
+  void stopControlServer() {
+    if (!_initialized) return;
+    _b.controlStop();
   }
 
   bool _disposed = false;

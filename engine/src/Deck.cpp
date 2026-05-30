@@ -2,8 +2,14 @@
 #include "miniaudio.h"
 #include "Deck.hpp"
 #include <cmath>
+#include <samplerate.h>
 #include "Clock.hpp"
 #include "Logger.hpp"
+
+// SINC quality used when resampling source files to the engine rate at decode
+// time. MEDIUM is realtime-friendly while loading; bump to SRC_SINC_BEST_QUALITY
+// for the highest quality at the cost of more CPU during load.
+static constexpr int kResampleQuality = SRC_SINC_MEDIUM_QUALITY;
 
 Deck::Deck(int sr) : currentFrame(0), visualFrame(0.0), playing(false), loading(false), framesAvailable(0), bpm(0.0f), beatOffset(0.0f), analyzing(false), metronomeEnabled(false), sampleRate(sr) {
     // Initialize RubberBand
@@ -28,7 +34,8 @@ Deck::~Deck() {
     delete stretcher;
 }
 
-bool Deck::load(const std::string& filepath, AnalysisDB* db) {
+bool Deck::load(const std::string& filepath, AnalysisDB* db,
+                double resumeSeconds, bool resumePlaying) {
     analysisCancel.store(true); // Bail any in-flight analysis so we don't block here
     analyzing.store(false);
     if (loaderThread.joinable()) loaderThread.join();
@@ -79,6 +86,10 @@ bool Deck::load(const std::string& filepath, AnalysisDB* db) {
     
     currentFilepath = filepath;
     currentFileHash = "";
+
+    // Set before the loader starts so loaderWork applies it race-free.
+    pendingResumeSeconds = resumeSeconds;
+    pendingResumePlaying = resumePlaying;
 
     loaderThread = std::thread(&Deck::loaderWork, this, filepath, db);
 
@@ -283,76 +294,125 @@ void Deck::loaderWork(std::string filepath, AnalysisDB* db) {
         }
     }
 
+    // Decode at the file's native sample rate (force f32 + stereo only), then
+    // resample to the engine rate with libsamplerate's SINC converter. This
+    // replaces miniaudio's low-quality linear resampler, which aliased badly
+    // when the source rate differed from the engine rate.
     ma_decoder decoder;
-    ma_result result = ma_decoder_init_file(filepath.c_str(), NULL, &decoder);
+    ma_decoder_config config = ma_decoder_config_init_default();
+    config.format   = ma_format_f32;
+    config.channels = 2; // Force stereo (leave sampleRate unset = decode native)
+
+    ma_result result = ma_decoder_init_file(filepath.c_str(), &config, &decoder);
     if (result != MA_SUCCESS) {
         Logger::error("Failed to open file: " + filepath);
         loading.store(false);
         return;
     }
 
-    ma_uint64 totalFrames;
-    if (ma_decoder_get_length_in_pcm_frames(&decoder, &totalFrames) != MA_SUCCESS) {
-        totalFrames = 0; 
-    }
-    
-    ma_decoder_uninit(&decoder);
-    
-    ma_decoder_config config = ma_decoder_config_init_default();
-    config.format = ma_format_f32;
-    config.channels = 2; // Force stereo
-    config.sampleRate = sampleRate; // Dynamic resampling
-    
-    result = ma_decoder_init_file(filepath.c_str(), &config, &decoder);
-    if (result != MA_SUCCESS) {
-        Logger::error("Failed to open file (2nd try): " + filepath);
-        loading.store(false);
-        return;
-    }
-    
-    ma_decoder_get_length_in_pcm_frames(&decoder, &totalFrames);
-    
+    const int nativeRate = (int)decoder.outputSampleRate;
+    ma_uint64 nativeTotal = 0;
+    ma_decoder_get_length_in_pcm_frames(&decoder, &nativeTotal);
+
+    const bool   needResample = (nativeRate > 0 && nativeRate != sampleRate);
+    const double ratio        = needResample ? (double)sampleRate / (double)nativeRate : 1.0;
+
+    // Engine-rate frame count. When resampling, over-allocate a small margin so
+    // SINC output (which can round a frame or two past ceil) always fits. The
+    // buffer is sized ONCE here and never reallocated while the audio thread may
+    // be reading it — framesAvailable gates how far playback can advance.
+    const uint64_t bufferFrames = needResample
+        ? (uint64_t)std::ceil((double)nativeTotal * ratio) + 256
+        : (uint64_t)nativeTotal;
+
     {
         std::lock_guard<std::mutex> lock(bufferMutex);
         buffer = AudioBuffer(2, sampleRate, 0, {}); // Empty data initially
-        buffer.resize(totalFrames); // Allocate vector
+        buffer.resize(bufferFrames);                // Allocate vector once
     }
-    
+
     fftEnergy.initialize(&buffer);
-    
-    uint64_t framesReadTotal = 0;
-    uint64_t chunkSize = 4096;
-    
-    while (framesReadTotal < totalFrames) {
-        float* pWrite = buffer.frame(framesReadTotal);
-        ma_uint64 framesReadThisIter;
-        
-        result = ma_decoder_read_pcm_frames(&decoder, pWrite, chunkSize, &framesReadThisIter);
-        
-        if (framesReadThisIter == 0) break;
-        
-        framesReadTotal += framesReadThisIter;
-        
-        fftEnergy.analyzeChunk(framesReadTotal - framesReadThisIter, framesReadThisIter);
 
-        framesAvailable.store(framesReadTotal);
+    // Resume near the previous source-time position (e.g. after a sample-rate
+    // change re-decodes this track). process() underrun-waits if the target
+    // frame hasn't streamed in yet, so playback catches up as frames arrive.
+    if (pendingResumeSeconds >= 0.0) {
+        uint64_t target = (uint64_t)(pendingResumeSeconds * (double)sampleRate);
+        if (bufferFrames > 0 && target >= bufferFrames) target = bufferFrames - 1;
+        currentFrame.store(target);
+        currentInputTime = (double)target / (double)sampleRate;
+        if (pendingResumePlaying) playing.store(true);
+        pendingResumeSeconds = -1.0;
+    }
 
-        // FFT energy for these frames is now cached, so the bins we emit can
-        // be colored correctly. Only complete bins are appended here.
-        summarizeUpTo(framesReadTotal, false);
+    const uint64_t chunkSize = 4096;
+    uint64_t framesWrittenTotal = 0; // engine-rate frames committed to the buffer
 
-        if (result != MA_SUCCESS) break;
+    // Publish freshly written engine-rate frames: cache their FFT energy (needed
+    // for waveform colour/transients), advance framesAvailable so playback can
+    // reach them, then summarize complete waveform bins.
+    auto commit = [&](uint64_t newTotal) {
+        fftEnergy.analyzeChunk(framesWrittenTotal, newTotal - framesWrittenTotal);
+        framesWrittenTotal = newTotal;
+        framesAvailable.store(framesWrittenTotal);
+        summarizeUpTo(framesWrittenTotal, false);
+    };
+
+    if (!needResample) {
+        // Fast path: file already at the engine rate — decode straight in.
+        while (framesWrittenTotal < bufferFrames) {
+            float* pWrite = buffer.frame(framesWrittenTotal);
+            ma_uint64 got = 0;
+            result = ma_decoder_read_pcm_frames(&decoder, pWrite, chunkSize, &got);
+            if (got == 0) break;
+            commit(framesWrittenTotal + got);
+            if (result != MA_SUCCESS) break;
+        }
+    } else {
+        Logger::info("Resampling " + std::to_string(nativeRate) + " Hz -> " +
+                     std::to_string(sampleRate) + " Hz (SINC)");
+        int srcErr = 0;
+        SRC_STATE* src = src_new(kResampleQuality, 2, &srcErr);
+        if (!src) Logger::error("src_new failed: " + std::string(src_strerror(srcErr)));
+
+        std::vector<float> inBuf(chunkSize * 2);
+        bool eof = false;
+        while (src && !eof && framesWrittenTotal < bufferFrames) {
+            ma_uint64 got = 0;
+            result = ma_decoder_read_pcm_frames(&decoder, inBuf.data(), chunkSize, &got);
+            eof = (got == 0) || (result != MA_SUCCESS);
+
+            SRC_DATA data;
+            data.data_in      = inBuf.data();
+            data.input_frames  = (long)got;
+            data.data_out      = buffer.frame(framesWrittenTotal);
+            data.output_frames = (long)(bufferFrames - framesWrittenTotal);
+            data.src_ratio     = ratio;
+            data.end_of_input  = eof ? 1 : 0;
+
+            int e = src_process(src, &data);
+            if (e) {
+                Logger::error("src_process failed: " + std::string(src_strerror(e)));
+                break;
+            }
+            if (data.output_frames_gen > 0)
+                commit(framesWrittenTotal + (uint64_t)data.output_frames_gen);
+            // The output region (rest of the track) is always large enough to
+            // consume a whole input chunk, so input is fully drained each call.
+            if (eof && data.output_frames_gen == 0) break; // SINC tail drained
+        }
+        if (src) src_delete(src);
     }
 
     // Flush the trailing partial bin once all frames are in, then normalize
     // transients across the whole track so the visuals are track-relative.
-    summarizeUpTo(framesReadTotal, true);
+    summarizeUpTo(framesWrittenTotal, true);
     normalizeWaveTransients();
 
     ma_decoder_uninit(&decoder);
 
     loading.store(false);
-    Logger::info("Loaded " + std::to_string(framesReadTotal) + " frames from " + filepath);
+    Logger::info("Loaded " + std::to_string(framesWrittenTotal) + " frames from " + filepath);
 
     if (!analysisFound) {
         analysisCancel.store(false);
