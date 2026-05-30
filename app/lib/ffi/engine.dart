@@ -19,6 +19,10 @@ class DeckState {
   final int currentFrame;
   final int sampleRate;
   final bool metronomeEnabled;
+  final double eqLow;
+  final double eqMid;
+  final double eqHigh;
+  final double volume;
   final bool loopActive;
   final int loopStart;
   final int loopEnd;
@@ -37,6 +41,10 @@ class DeckState {
     required this.currentFrame,
     required this.sampleRate,
     required this.metronomeEnabled,
+    required this.eqLow,
+    required this.eqMid,
+    required this.eqHigh,
+    required this.volume,
     required this.loopActive,
     required this.loopStart,
     required this.loopEnd,
@@ -106,6 +114,50 @@ class WaveformData {
   }
 }
 
+/// One automation lane (a LazerScript `onBeat` keyframe envelope) on a deck,
+/// for drawing on top of the waveform. [beats] are absolute beats from the grid
+/// origin; [values] are raw engine units (0..1, 0.5 = unity for EQ).
+class AutomationLane {
+  /// 0 = Low, 1 = Mid, 2 = High, 3 = Vol.
+  final int paramId;
+  final Float64List beats;
+  final Float32List values;
+
+  const AutomationLane(this.paramId, this.beats, this.values);
+
+  static const _names = ['Low', 'Mid', 'High', 'Vol'];
+
+  /// Short, display-friendly parameter name ("Low", "Mid", "High", "Vol").
+  String get name => paramId >= 0 && paramId < _names.length
+      ? _names[paramId]
+      : 'P$paramId';
+}
+
+/// Kind of timeline marker. Index order must match the engine's `MarkerKind`
+/// (lazerdeck.h): 0 = generic, 1 = play, 2 = jump. Append new kinds at the end.
+enum MarkerKind { generic, play, jump }
+
+/// One discrete beat event on a deck's timeline (a LazerScript trigger), for
+/// drawing on the waveform. [beat] is the absolute (0-based, grid-origin) beat
+/// on this deck where it fires; [targetDeck]/[targetBeat] describe what it does
+/// to another deck (−1 / negative when not applicable). [label] is an
+/// engine-formatted short display string (e.g. "▶ D2", "D2→16").
+class DeckMarker {
+  final MarkerKind kind;
+  final double beat;
+  final int targetDeck;
+  final double targetBeat;
+  final String label;
+
+  const DeckMarker({
+    required this.kind,
+    required this.beat,
+    required this.targetDeck,
+    required this.targetBeat,
+    required this.label,
+  });
+}
+
 /// A selectable audio output device.
 class AudioDevice {
   final int index;
@@ -160,6 +212,25 @@ class LazerdeckEngine {
   ffi.Pointer<ffi.Float> _binMinMax = ffi.nullptr;
   ffi.Pointer<ffi.Uint32> _binRgba = ffi.nullptr;
   int _binCapacity = 0;
+  // Reused scratch for the automation-lane poll. A deck has at most one lane
+  // per param (low/mid/high/vol); _kMaxKeys bounds total keyframes per deck.
+  static const int _kMaxLanes = 4;
+  static const int _kMaxKeys = 512;
+  final ffi.Pointer<ffi.Int32> _laneParamIds = calloc<ffi.Int32>(_kMaxLanes);
+  final ffi.Pointer<ffi.Uint32> _laneKeyCounts = calloc<ffi.Uint32>(_kMaxLanes);
+  final ffi.Pointer<ffi.Double> _laneBeats = calloc<ffi.Double>(_kMaxKeys);
+  final ffi.Pointer<ffi.Float> _laneValues = calloc<ffi.Float>(_kMaxKeys);
+  // Reused scratch for the marker poll. Mirrors LAZERDECK_MARKER_LABEL_LEN.
+  static const int _kMaxMarkers = 64;
+  static const int _kMarkerLabelLen = 48;
+  final ffi.Pointer<ffi.Int32> _markerKinds = calloc<ffi.Int32>(_kMaxMarkers);
+  final ffi.Pointer<ffi.Double> _markerBeats = calloc<ffi.Double>(_kMaxMarkers);
+  final ffi.Pointer<ffi.Int32> _markerTargetDecks =
+      calloc<ffi.Int32>(_kMaxMarkers);
+  final ffi.Pointer<ffi.Double> _markerTargetBeats =
+      calloc<ffi.Double>(_kMaxMarkers);
+  final ffi.Pointer<ffi.Char> _markerLabels =
+      calloc<ffi.Char>(_kMaxMarkers * _kMarkerLabelLen);
   int _deckCount = 0;
   bool _initialized = false;
 
@@ -223,6 +294,10 @@ class LazerdeckEngine {
   void setMetronome(int deck, bool on) =>
       pushCommand('${_d(deck)} metronome ${on ? 1 : 0}');
 
+  /// Fires a single metronome click, independent of the beat grid (used by the
+  /// Tap Tempo wizard so each tap is audible).
+  void metronomeTick(int deck) => pushCommand('${_d(deck)} metronome_tick');
+
   /// Deletes this track's cached analysis and re-runs BPM detection.
   void reanalyze(int deck) => pushCommand('${_d(deck)} reanalyze');
 
@@ -278,6 +353,10 @@ class LazerdeckEngine {
       currentFrame: s.currentFrame,
       sampleRate: s.sampleRate,
       metronomeEnabled: s.metronomeEnabled != 0,
+      eqLow: s.eqLow,
+      eqMid: s.eqMid,
+      eqHigh: s.eqHigh,
+      volume: s.volume,
       loopActive: s.loopActive != 0,
       loopStart: s.loopStart,
       loopEnd: s.loopEnd,
@@ -324,6 +403,69 @@ class LazerdeckEngine {
     out.data = Float32List.fromList(_binMinMax.asTypedList(copied * 4));
     out.colors =
         Int32List.fromList(_binRgba.cast<ffi.Int32>().asTypedList(copied));
+  }
+
+  /// Snapshots [deck]'s automation lanes (LazerScript `onBeat` envelopes) for
+  /// the waveform overlay. Cheap enough to poll each frame; returns an empty
+  /// list when the deck has no automation. Keyframes beyond [_kMaxKeys] total
+  /// per deck are dropped (far more than any usable script).
+  List<AutomationLane> deckLanes(int deck) {
+    if (!_initialized) return const [];
+    final n = _b.getLanes(deck, _kMaxLanes, _kMaxKeys, _laneParamIds,
+        _laneKeyCounts, _laneBeats, _laneValues);
+    if (n <= 0) return const [];
+
+    final lanes = <AutomationLane>[];
+    var off = 0;
+    for (var i = 0; i < n; i++) {
+      final count = _laneKeyCounts[i];
+      final beats = Float64List(count);
+      final values = Float32List(count);
+      for (var k = 0; k < count; k++) {
+        beats[k] = _laneBeats[off + k];
+        values[k] = _laneValues[off + k];
+      }
+      off += count;
+      lanes.add(AutomationLane(_laneParamIds[i], beats, values));
+    }
+    return lanes;
+  }
+
+  /// Snapshots [deck]'s timeline markers (LazerScript triggers like
+  /// `play when …`). Cheap to poll each frame; returns an empty list when the
+  /// deck has none. Markers beyond [_kMaxMarkers] are dropped.
+  List<DeckMarker> deckMarkers(int deck) {
+    if (!_initialized) return const [];
+    final n = _b.getMarkers(deck, _kMaxMarkers, _markerKinds, _markerBeats,
+        _markerTargetDecks, _markerTargetBeats, _markerLabels);
+    if (n <= 0) return const [];
+
+    final out = <DeckMarker>[];
+    for (var i = 0; i < n; i++) {
+      final k = _markerKinds[i];
+      out.add(DeckMarker(
+        kind: (k >= 0 && k < MarkerKind.values.length)
+            ? MarkerKind.values[k]
+            : MarkerKind.generic,
+        beat: _markerBeats[i],
+        targetDeck: _markerTargetDecks[i],
+        targetBeat: _markerTargetBeats[i],
+        label: _readMarkerLabel(i),
+      ));
+    }
+    return out;
+  }
+
+  String _readMarkerLabel(int i) {
+    final p = _markerLabels.cast<ffi.Uint8>();
+    final base = i * _kMarkerLabelLen;
+    final bytes = <int>[];
+    for (var j = 0; j < _kMarkerLabelLen; j++) {
+      final c = p[base + j];
+      if (c == 0) break;
+      bytes.add(c);
+    }
+    return utf8.decode(bytes, allowMalformed: true);
   }
 
   String _readFilepath(LazerDeckState s) => _readChars(s.filepath, 512);
@@ -403,6 +545,15 @@ class LazerdeckEngine {
     calloc.free(_scratch);
     calloc.free(_binCountOut);
     calloc.free(_binFramesOut);
+    calloc.free(_laneParamIds);
+    calloc.free(_laneKeyCounts);
+    calloc.free(_laneBeats);
+    calloc.free(_laneValues);
+    calloc.free(_markerKinds);
+    calloc.free(_markerBeats);
+    calloc.free(_markerTargetDecks);
+    calloc.free(_markerTargetBeats);
+    calloc.free(_markerLabels);
     if (_binMinMax != ffi.nullptr) calloc.free(_binMinMax);
     if (_binRgba != ffi.nullptr) calloc.free(_binRgba);
     _disposed = true;

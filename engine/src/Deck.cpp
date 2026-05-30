@@ -155,82 +155,109 @@ void Deck::resetTriggers() {
 }
 
 void Deck::analyzeBPMWork(AnalysisDB* db) {
-    soundtouch::BPMDetect bpmDetector(2, sampleRate);
+    // BTrack consumes one hop (512 samples) of mono audio per call and reports
+    // when a beat falls in that hop. We mix the stereo buffer to mono and feed
+    // it hop by hop, recording the source-frame position of each detected beat.
+    const int hopSize = 512;
+    const int frameSize = 1024;
+    BTrack btrack(hopSize, frameSize, sampleRate);
+
+    std::vector<double> hop(hopSize);
+    std::vector<uint64_t> beatFrames; // source-frame positions of detected beats
 
     uint64_t processedFrames = 0;
-    const uint64_t chunkSize = 2048;
-    const uint64_t maxFrames = (uint64_t)sampleRate * 300;
-    Logger::info("Starting BPM analysis...");
+    const uint64_t maxFrames = (uint64_t)sampleRate * 300; // analyze first 5 minutes
+    Logger::info("Starting BPM analysis (BTrack)...");
 
     while (analyzing.load()) {
         if (analysisCancel.load()) { analyzing.store(false); return; }
+
         uint64_t avail = framesAvailable.load();
         bool isLoaded = !loading.load();
-        uint64_t framesToProcess = chunkSize;
 
-        if (processedFrames + chunkSize > avail) {
-            if (isLoaded) {
-                if (processedFrames < avail) {
-                    framesToProcess = avail - processedFrames;
-                } else {
-                    break;
-                }
-            } else {
-                std::this_thread::sleep_for(std::chrono::milliseconds(10));
-                continue;
+        // BTrack needs a full hop before it can process; wait for the loader
+        // to stream more in, or stop once the whole track has arrived.
+        if (processedFrames + (uint64_t)hopSize > avail) {
+            if (isLoaded) break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            continue;
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(bufferMutex);
+            if (processedFrames + (uint64_t)hopSize > buffer.frameCount) break;
+            const unsigned int ch = buffer.channels ? buffer.channels : 1;
+            const float* src = buffer.frame(processedFrames);
+            for (int i = 0; i < hopSize; ++i) {
+                float sum = 0.0f;
+                for (unsigned int c = 0; c < ch; ++c) sum += src[i * ch + c];
+                hop[i] = (double)(sum / (float)ch);
             }
         }
 
-        std::lock_guard<std::mutex> lock(bufferMutex);
-        if (processedFrames >= buffer.frameCount) {
-            break;
-        }
-        
-        // Safety check
-        if (processedFrames + framesToProcess > buffer.frameCount) {
-            framesToProcess = buffer.frameCount > processedFrames ? buffer.frameCount - processedFrames : 0;
-        }
-        
-        if (framesToProcess == 0) break;
+        btrack.processAudioFrame(hop.data());
+        if (btrack.beatDueInCurrentFrame())
+            beatFrames.push_back(processedFrames);
 
-        const float* src = buffer.frame(processedFrames);
+        processedFrames += (uint64_t)hopSize;
 
-        try {
-             bpmDetector.inputSamples(src, static_cast<int>(framesToProcess));
-        } catch (...) {
-             break;
+        if (processedFrames % (uint64_t)(sampleRate * 5) < (uint64_t)hopSize) {
+            float progress = (float)processedFrames /
+                             (float)std::min(buffer.frameCount, maxFrames) * 100.0f;
+            Logger::info("BPM analysis progress: " + std::to_string((int)progress) + "%");
         }
 
-        processedFrames += framesToProcess;
-
-        if (processedFrames % (sampleRate * 5) < chunkSize) {
-            float progress = (float)processedFrames / (float)std::min(buffer.frameCount, maxFrames) * 100.0f;
-            // Logger doesn't support \r well, but we'll just log it occasionally
-            if ((int)progress % 10 == 0) {
-                Logger::info("BPM analysis progress: " + std::to_string((int)progress) + "%");
-            }
-        }
-
-        if (processedFrames >= maxFrames) {
-            break;
-        }
+        if (processedFrames >= maxFrames) break;
     }
 
-    // Cancelled mid-stream (new load or manual override) — bail before the
-    // expensive final pass and don't touch bpm or the DB.
+    // Cancelled mid-stream (new load or manual override) — don't touch bpm/DB.
     if (analysisCancel.load()) { analyzing.store(false); return; }
 
-    Logger::info("Analyzing BPM from " + std::to_string(processedFrames) + " frames...");
+    // Derive BPM from the median inter-beat interval (robust to the occasional
+    // spurious or dropped beat) and the grid phase (beatOffset, in frames) from
+    // the circular mean of the beat positions modulo one beat period — circular
+    // so beats straddling the 0 / framesPerBeat wrap don't bias the result.
+    float resultBpm = 0.0f;
+    float resultOffset = 0.0f;
 
-    float result = bpmDetector.getBpm();
+    if (beatFrames.size() >= 4) {
+        std::vector<double> ibis;
+        ibis.reserve(beatFrames.size() - 1);
+        for (size_t i = 1; i < beatFrames.size(); ++i)
+            ibis.push_back((double)(beatFrames[i] - beatFrames[i - 1]));
+        std::sort(ibis.begin(), ibis.end());
+        const double medianIBI = ibis[ibis.size() / 2];
+
+        if (medianIBI > 0.0) {
+            resultBpm = (float)(60.0 * (double)sampleRate / medianIBI);
+            const double framesPerBeat = medianIBI;
+
+            double sumSin = 0.0, sumCos = 0.0;
+            for (uint64_t bf : beatFrames) {
+                const double theta = 2.0 * M_PI * ((double)bf / framesPerBeat);
+                sumSin += std::sin(theta);
+                sumCos += std::cos(theta);
+            }
+            double meanTheta = std::atan2(sumSin, sumCos);
+            if (meanTheta < 0.0) meanTheta += 2.0 * M_PI;
+            resultOffset = (float)(meanTheta / (2.0 * M_PI) * framesPerBeat);
+        }
+    } else {
+        // Too few beats to trust the phase; fall back to BTrack's running tempo.
+        resultBpm = (float)btrack.getCurrentTempoEstimate();
+    }
+
     if (bpmManual.load() || analysisCancel.load()) {
         Logger::info("BPM analysis discarded (manual override or cancelled)");
-    } else if (result > 0.0f) {
-        bpm.store(result);
-        Logger::info("BPM Detected: " + std::to_string(result));
+    } else if (resultBpm > 0.0f) {
+        bpm.store(resultBpm);
+        beatOffset.store(resultOffset);
+        Logger::info("BPM Detected: " + std::to_string(resultBpm) +
+                     ", Beat offset: " + std::to_string(resultOffset) + " frames (from " +
+                     std::to_string(beatFrames.size()) + " beats)");
         // Persist so future loads hit the DB instead of re-analyzing.
         if (db && currentFileHash != "") {
-            db->save(currentFileHash, result, beatOffset.load());
+            db->save(currentFileHash, resultBpm, resultOffset);
             Logger::info("Saved analysis to DB for " + currentFilepath);
         }
     } else {

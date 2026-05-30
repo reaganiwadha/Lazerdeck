@@ -44,6 +44,26 @@ double _ampToUnit(double amp) {
 // strides so numbered lines never crowd closer than _kMinBeatLabelPx apart.
 const double _kMinBeatLabelPx = 36.0;
 
+// Automation-lane overlay. One color per param (index = AutomationLane.paramId).
+const List<Color> _kLaneColors = [
+  Color(0xFFFF5252), // Low  — red
+  Color(0xFF4CAF50), // Mid  — green
+  Color(0xFF40C4FF), // High — cyan
+  Color(0xFFFFC400), // Vol  — amber
+];
+// The envelope graph occupies this vertical fraction of the view (value 1 at
+// the top inset, value 0 at the bottom inset), inset so it never collides with
+// the beat-number pills along the top edge.
+const double _kLaneTopInset = 0.16;
+const double _kLaneBottomInset = 0.92;
+
+// Discrete-event marker styling, keyed by MarkerKind.index.
+const List<Color> _kMarkerColors = [
+  Color(0xFFB0BEC5), // generic — blue-grey
+  Color(0xFF69F0AE), // play    — green
+  Color(0xFFB388FF), // jump    — purple
+];
+
 class WaveformView extends StatefulWidget {
   final LazerdeckEngine engine;
   final int deck;
@@ -106,6 +126,8 @@ class _WaveformViewState extends State<WaveformView>
       ..beatOffset = s.beatOffset
       ..sampleRate = s.sampleRate
       ..loading = s.isLoading
+      ..lanes = widget.engine.deckLanes(widget.deck)
+      ..markers = widget.engine.deckMarkers(widget.deck)
       ..tick();
   }
 
@@ -214,6 +236,8 @@ class _WaveModel extends ChangeNotifier {
   int sampleRate = 44100;
   double samplesPerPixel = 256;
   bool loading = false;
+  List<AutomationLane> lanes = const [];
+  List<DeckMarker> markers = const [];
 
   void tick() => notifyListeners();
 }
@@ -331,11 +355,216 @@ class _WavePainter extends CustomPainter {
       canvas.drawVertices(verts, ui.BlendMode.srcOver, Paint());
     }
 
-    _drawBeatGrid(canvas, size, spp, half);
+    // === Timeline overlay ===========================================
+    // Two families of annotations are drawn over the waveform, both indexed by
+    // beat and sharing the grid geometry:
+    //   * Automation lanes (_drawLanes)   — continuous per-param envelopes.
+    //   * Event markers     (_drawMarkers) — discrete beat triggers.
+    // Each integer beat that any overlay sits on gets its grid label tinted.
+    // To add a new overlay type: surface it on _WaveModel, contribute its beats
+    // to _overlayBeatColors, and add a _drawX pass here.
+    final highlight = _overlayBeatColors();
+    _drawBeatGrid(canvas, size, spp, half, highlight);
+    _drawMarkers(canvas, size, spp, half);
+    _drawLanes(canvas, size, spp, half);
     _drawPlayhead(canvas, size, half);
   }
 
-  void _drawBeatGrid(Canvas canvas, Size size, double spp, double half) {
+  /// Maps each integer beat carrying an overlay (lane keyframe or marker) to the
+  /// color it should tint the grid label with (last writer wins on overlap).
+  Map<int, Color> _overlayBeatColors() {
+    if (m.lanes.isEmpty && m.markers.isEmpty) return const {};
+    final out = <int, Color>{};
+    void mark(double beat, Color c) {
+      final r = beat.round();
+      if ((beat - r).abs() < 1e-6) out[r] = c;
+    }
+    for (final lane in m.lanes) {
+      for (final b in lane.beats) {
+        mark(b, _laneColor(lane.paramId));
+      }
+    }
+    for (final mk in m.markers) {
+      mark(mk.beat, _markerColor(mk.kind));
+    }
+    return out;
+  }
+
+  Color _laneColor(int paramId) => (paramId >= 0 && paramId < _kLaneColors.length)
+      ? _kLaneColors[paramId]
+      : Colors.white;
+
+  Color _markerColor(MarkerKind kind) => kind.index < _kMarkerColors.length
+      ? _kMarkerColors[kind.index]
+      : Colors.white;
+
+  // Frame on the source timeline for an absolute (grid-origin) beat.
+  double _beatToFrame(double beat, double framesPerBeat) =>
+      beat * framesPerBeat + m.beatOffset;
+
+  /// Draws each automation lane as a piecewise-linear envelope across the
+  /// waveform: flat-held before the first / after the last keyframe (matching
+  /// the engine's evalEnvelope), with a dot + value label at each keyframe.
+  void _drawLanes(Canvas canvas, Size size, double spp, double half) {
+    if (m.lanes.isEmpty || m.bpm <= 0 || m.sampleRate <= 0) return;
+    final framesPerBeat = m.sampleRate * 60.0 / m.bpm;
+    if (framesPerBeat <= 0) return;
+
+    final w = size.width;
+    final yTop = size.height * _kLaneTopInset;
+    final yBot = size.height * _kLaneBottomInset;
+    double valueToY(double v) => yTop + (1.0 - v.clamp(0.0, 1.0)) * (yBot - yTop);
+    double beatToX(double beat) =>
+        half + (_beatToFrame(beat, framesPerBeat) - m.currentFrame) / spp;
+
+    for (final lane in m.lanes) {
+      final n = lane.beats.length;
+      if (n == 0) continue;
+      final color = _laneColor(lane.paramId);
+
+      // Envelope path: hold the first value out to the left edge, ramp through
+      // the keyframes, hold the last value out to the right edge.
+      final path = Path()..moveTo(0, valueToY(lane.values[0]));
+      for (var i = 0; i < n; i++) {
+        path.lineTo(beatToX(lane.beats[i]), valueToY(lane.values[i]));
+      }
+      path.lineTo(w, valueToY(lane.values[n - 1]));
+      canvas.drawPath(
+        path,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2
+          ..strokeJoin = StrokeJoin.round
+          ..color = color.withValues(alpha: 0.95),
+      );
+
+      // Keyframe dots + value labels (only those near the viewport).
+      final dot = Paint()..color = color;
+      final ring = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5
+        ..color = Colors.black.withValues(alpha: 0.6);
+      // Faint full-height guide at each keyframe beat, so they line up against
+      // the waveform even between numbered grid lines (and for fractional beats).
+      final guide = Paint()
+        ..strokeWidth = 1
+        ..color = color.withValues(alpha: 0.22);
+      for (var i = 0; i < n; i++) {
+        final x = beatToX(lane.beats[i]);
+        if (x < -40 || x > w + 40) continue;
+        final y = valueToY(lane.values[i]);
+        canvas.drawLine(Offset(x, 0), Offset(x, size.height), guide);
+        canvas.drawCircle(Offset(x, y), 3.5, dot);
+        canvas.drawCircle(Offset(x, y), 3.5, ring);
+        // Label the lane name on the first keyframe, just the value after.
+        final text = i == 0
+            ? '${lane.name} ${_fmtVal(lane.values[i])}'
+            : _fmtVal(lane.values[i]);
+        _drawLaneLabel(canvas, x, y, text, color);
+      }
+    }
+  }
+
+  static String _fmtVal(double v) =>
+      (v - v.roundToDouble()).abs() < 1e-3 ? v.toStringAsFixed(0) : v.toStringAsFixed(2);
+
+  final Map<String, TextPainter> _laneLabelCache = {};
+
+  TextPainter _laneLabelPainter(String text) =>
+      _laneLabelCache.putIfAbsent(text, () {
+        return TextPainter(
+          text: TextSpan(
+            text: text,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          textDirection: TextDirection.ltr,
+        )..layout();
+      });
+
+  void _drawLaneLabel(Canvas canvas, double x, double y, String text, Color color) {
+    final tp = _laneLabelPainter(text);
+    const padX = 4.0;
+    const padY = 1.5;
+    // Sit the pill just above-right of the keyframe dot.
+    final left = x + 6;
+    final top = y - tp.height - padY * 2 - 4;
+    final rect = Rect.fromLTWH(left, top, tp.width + padX * 2, tp.height + padY * 2);
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(rect, const Radius.circular(3)),
+      Paint()..color = color.withValues(alpha: 0.85),
+    );
+    tp.paint(canvas, Offset(left + padX, top + padY));
+  }
+
+  /// Draws discrete event markers (script triggers) as a dashed vertical guide
+  /// with a labelled flag along the bottom edge, colored by kind.
+  void _drawMarkers(Canvas canvas, Size size, double spp, double half) {
+    if (m.markers.isEmpty || m.bpm <= 0 || m.sampleRate <= 0) return;
+    final framesPerBeat = m.sampleRate * 60.0 / m.bpm;
+    if (framesPerBeat <= 0) return;
+
+    final w = size.width;
+    final h = size.height;
+    double beatToX(double beat) =>
+        half + (_beatToFrame(beat, framesPerBeat) - m.currentFrame) / spp;
+
+    for (final mk in m.markers) {
+      final x = beatToX(mk.beat);
+      if (x < -80 || x > w + 80) continue;
+      final color = _markerColor(mk.kind);
+      _drawDashedVLine(canvas, x, 0, h, color.withValues(alpha: 0.5));
+      // A little flag base at the bottom edge, pointing up to the guide.
+      final tri = Path()
+        ..moveTo(x - 4, h)
+        ..lineTo(x + 4, h)
+        ..lineTo(x, h - 6)
+        ..close();
+      canvas.drawPath(tri, Paint()..color = color);
+      _drawMarkerLabel(canvas, x, h, _markerDisplay(mk), color);
+    }
+  }
+
+  static String _markerDisplay(DeckMarker mk) {
+    final s = mk.label;
+    return s.length <= 18 ? s : '${s.substring(0, 17)}…';
+  }
+
+  void _drawDashedVLine(Canvas canvas, double x, double y0, double y1, Color c) {
+    final p = Paint()
+      ..color = c
+      ..strokeWidth = 1.5;
+    const dash = 5.0;
+    const gap = 4.0;
+    var y = y0;
+    while (y < y1) {
+      final yEnd = math.min(y + dash, y1);
+      canvas.drawLine(Offset(x, y), Offset(x, yEnd), p);
+      y = yEnd + gap;
+    }
+  }
+
+  void _drawMarkerLabel(Canvas canvas, double x, double h, String text, Color color) {
+    final tp = _laneLabelPainter(text);
+    const padX = 4.0;
+    const padY = 1.5;
+    final boxW = tp.width + padX * 2;
+    final boxH = tp.height + padY * 2;
+    final left = x - boxW / 2; // centered over the marker
+    final top = h - 10 - boxH; // sit just above the bottom flag
+    final rect = Rect.fromLTWH(left, top, boxW, boxH);
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(rect, const Radius.circular(3)),
+      Paint()..color = color.withValues(alpha: 0.9),
+    );
+    tp.paint(canvas, Offset(left + padX, top + padY));
+  }
+
+  void _drawBeatGrid(Canvas canvas, Size size, double spp, double half,
+      Map<int, Color> highlight) {
     if (m.bpm <= 0 || m.sampleRate <= 0) return;
     final framesPerBeat = m.sampleRate * 60.0 / m.bpm;
     if (framesPerBeat <= 0) return;
@@ -379,9 +608,10 @@ class _WavePainter extends CustomPainter {
       final isBar = i % 4 == 0;
       canvas.drawLine(Offset(x, 0), Offset(x, size.height), isBar ? bar : beat);
       // Beat numbers are 1-based like the old SDL renderer; every drawn line is
-      // labeled, never for beats before the grid origin.
+      // labeled, never for beats before the grid origin. Beats carrying a
+      // keyframe get the lane color so the automation reads against the grid.
       if (i >= 0) {
-        _drawBeatLabel(canvas, x, i + 1);
+        _drawBeatLabel(canvas, x, i + 1, highlight[i]);
       }
     }
   }
@@ -404,15 +634,19 @@ class _WavePainter extends CustomPainter {
         )..layout();
       });
 
-  void _drawBeatLabel(Canvas canvas, double x, int number) {
+  void _drawBeatLabel(Canvas canvas, double x, int number, [Color? highlight]) {
     final tp = _labelPainter(number);
     const padX = 3.0;
     const padY = 1.0;
-    // Dark pill behind the number so it reads over both background and peaks.
+    // Pill behind the number so it reads over both background and peaks; the
+    // lane color (opaque) when this beat carries a keyframe, dark otherwise.
     final rect = Rect.fromLTWH(x + 2, 2, tp.width + padX * 2, tp.height + padY * 2);
     canvas.drawRRect(
       RRect.fromRectAndRadius(rect, const Radius.circular(3)),
-      Paint()..color = Colors.black.withValues(alpha: 0.55),
+      Paint()
+        ..color = highlight != null
+            ? highlight.withValues(alpha: 0.95)
+            : Colors.black.withValues(alpha: 0.55),
     );
     tp.paint(canvas, Offset(x + 2 + padX, 2 + padY));
   }

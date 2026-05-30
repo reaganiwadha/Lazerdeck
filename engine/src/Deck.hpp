@@ -9,7 +9,7 @@
 #include <mutex>
 #include "audio.hpp"
 #include "fft.hpp"
-#include <BPMDetect.h>
+#include "BTrack.h"
 #include <rubberband/RubberBandStretcher.h>
 #include "AnalysisDB.hpp"
 #include "Trigger.hpp"
@@ -97,6 +97,13 @@ public:
         void setMetronome(bool on) { metronomeEnabled.store(on); }
 
         bool isMetronomeEnabled() const { return metronomeEnabled.load(); }
+
+        // One-shot metronome click, independent of the grid (used by the Tap
+        // Tempo wizard so every tap is audible even when the grid metronome is
+        // off). requestMetronomeTick() is called from the UI/command thread;
+        // consumeMetronomeTick() is called once per buffer on the audio thread.
+        void requestMetronomeTick() { metronomeTick.store(true); }
+        bool consumeMetronomeTick() { return metronomeTick.exchange(false); }
 
     
 
@@ -218,6 +225,9 @@ public:
         // Metronome state (enabled/disabled)
 
         std::atomic<bool> metronomeEnabled{false};
+
+        // Set by requestMetronomeTick(), consumed once on the audio thread.
+        std::atomic<bool> metronomeTick{false};
 
         
 

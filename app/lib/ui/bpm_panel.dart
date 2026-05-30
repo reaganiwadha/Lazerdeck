@@ -6,6 +6,7 @@
 import 'package:flutter/material.dart';
 
 import '../ffi/engine.dart';
+import 'tap_tempo_wizard.dart';
 
 const _accent = Color(0xFFE0344B);
 const double _offsetNudgeMs = 5.0;
@@ -113,6 +114,14 @@ class BpmControls extends StatelessWidget {
           lit: s?.metronomeEnabled ?? false,
           onTap: () =>
               engine.setMetronome(deck, !(s?.metronomeEnabled ?? false)),
+        ),
+        const SizedBox(width: 4),
+        // Tap Tempo wizard.
+        _MiniButton(
+          icon: Icons.touch_app,
+          tooltip: 'Tap Tempo wizard',
+          noBorder: true,
+          onTap: () => showTapTempoWizard(context, engine, deck),
         ),
         const SizedBox(width: 4),
         // Manual BPM/offset entry — emphasized when undetermined.

@@ -45,6 +45,11 @@ public:
     void setEqMid(float knob)  { eq.setMid(knob); }
     void setEqHigh(float knob) { eq.setHigh(knob); }
 
+    // Current EQ knob positions (for UI feedback).
+    float getEqLow()  const { return eq.getLow(); }
+    float getEqMid()  const { return eq.getMid(); }
+    float getEqHigh() const { return eq.getHigh(); }
+
 private:
     void destroySlot(VstSlot& slot); // requires vstMutex held
 

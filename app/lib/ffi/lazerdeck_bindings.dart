@@ -42,6 +42,14 @@ final class LazerDeckState extends ffi.Struct {
   external int sampleRate;
   @ffi.Int32()
   external int metronomeEnabled;
+  @ffi.Float()
+  external double eqLow;
+  @ffi.Float()
+  external double eqMid;
+  @ffi.Float()
+  external double eqHigh;
+  @ffi.Float()
+  external double volume;
   @ffi.Array(512)
   external ffi.Array<ffi.Char> filepath;
 }
@@ -127,6 +135,20 @@ typedef _AudioCfgDart = int Function(ffi.Pointer<LazerAudioConfig>);
 typedef _SetDevC = ffi.Int32 Function(ffi.Int32);
 typedef _SetDevDart = int Function(int);
 
+typedef _GetLanesC = ffi.Int32 Function(
+    ffi.Int32, ffi.Uint32, ffi.Uint32, ffi.Pointer<ffi.Int32>,
+    ffi.Pointer<ffi.Uint32>, ffi.Pointer<ffi.Double>, ffi.Pointer<ffi.Float>);
+typedef _GetLanesDart = int Function(
+    int, int, int, ffi.Pointer<ffi.Int32>, ffi.Pointer<ffi.Uint32>,
+    ffi.Pointer<ffi.Double>, ffi.Pointer<ffi.Float>);
+
+typedef _GetMarkersC = ffi.Int32 Function(
+    ffi.Int32, ffi.Uint32, ffi.Pointer<ffi.Int32>, ffi.Pointer<ffi.Double>,
+    ffi.Pointer<ffi.Int32>, ffi.Pointer<ffi.Double>, ffi.Pointer<ffi.Char>);
+typedef _GetMarkersDart = int Function(
+    int, int, ffi.Pointer<ffi.Int32>, ffi.Pointer<ffi.Double>,
+    ffi.Pointer<ffi.Int32>, ffi.Pointer<ffi.Double>, ffi.Pointer<ffi.Char>);
+
 /// Resolves all symbols from the lazerdeck engine shared library.
 class LazerdeckBindings {
   LazerdeckBindings(ffi.DynamicLibrary lib)
@@ -155,7 +177,11 @@ class LazerdeckBindings {
         getAudioConfig = lib.lookupFunction<_AudioCfgC, _AudioCfgDart>(
             'lazerdeck_get_audio_config'),
         setAudioDevice = lib.lookupFunction<_SetDevC, _SetDevDart>(
-            'lazerdeck_set_audio_device');
+            'lazerdeck_set_audio_device'),
+        getLanes = lib.lookupFunction<_GetLanesC, _GetLanesDart>(
+            'lazerdeck_get_lanes'),
+        getMarkers = lib.lookupFunction<_GetMarkersC, _GetMarkersDart>(
+            'lazerdeck_get_markers');
 
   final _InitDart init;
   final _VoidDart shutdown;
@@ -172,6 +198,8 @@ class LazerdeckBindings {
   final _AudioDevDart getAudioDevice;
   final _AudioCfgDart getAudioConfig;
   final _SetDevDart setAudioDevice;
+  final _GetLanesDart getLanes;
+  final _GetMarkersDart getMarkers;
 
   /// Opens the engine library bundled next to the executable.
   static LazerdeckBindings open() {

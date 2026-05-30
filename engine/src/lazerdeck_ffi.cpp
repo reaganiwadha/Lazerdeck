@@ -73,6 +73,14 @@ int32_t lazerdeck_get_deck_state(int32_t deck_idx, LazerDeckState* out) {
     out->sample_rate   = g_engine->getSampleRate();
     out->metronome_enabled = deck->isMetronomeEnabled() ? 1 : 0;
 
+    // Current channel EQ/volume so the UI knobs reflect script/automation.
+    auto* mixer = g_engine->getMixer();
+    auto* ch = mixer ? mixer->getChannel(deck_idx) : nullptr;
+    out->eq_low  = ch ? ch->getEqLow()  : 0.5f;
+    out->eq_mid  = ch ? ch->getEqMid()  : 0.5f;
+    out->eq_high = ch ? ch->getEqHigh() : 0.5f;
+    out->volume  = ch ? ch->getVolume() : 1.0f;
+
     std::string fp = deck->getCurrentFilepath();
     std::strncpy(out->filepath, fp.c_str(), 511);
     out->filepath[511] = '\0';
@@ -169,4 +177,22 @@ int32_t lazerdeck_copy_wave_bins(int32_t deck_idx, uint64_t start, uint32_t coun
     Deck* deck = g_engine->getDeck(deck_idx);
     if (!deck) return 0;
     return (int32_t)deck->copyWaveBins(start, count, out_minmax, out_rgba);
+}
+
+int32_t lazerdeck_get_lanes(int32_t deck_idx, uint32_t max_lanes, uint32_t max_keys,
+                            int32_t* out_param_ids, uint32_t* out_key_counts,
+                            double* out_beats, float* out_values) {
+    if (!g_engine) return 0;
+    return g_engine->snapshotLanes(deck_idx, max_lanes, max_keys,
+                                   out_param_ids, out_key_counts,
+                                   out_beats, out_values);
+}
+
+int32_t lazerdeck_get_markers(int32_t deck_idx, uint32_t max_markers,
+                              int32_t* out_kinds, double* out_beats,
+                              int32_t* out_target_decks, double* out_target_beats,
+                              char* out_labels) {
+    if (!g_engine) return 0;
+    return g_engine->snapshotMarkers(deck_idx, max_markers, out_kinds, out_beats,
+                                     out_target_decks, out_target_beats, out_labels);
 }

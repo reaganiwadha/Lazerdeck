@@ -8,6 +8,7 @@ import 'analyze_overlay.dart';
 import 'bpm_panel.dart';
 import 'cover_art.dart';
 import 'eq_panel.dart';
+import 'script_editor.dart';
 import 'settings_dialog.dart';
 import 'waveform_view.dart';
 
@@ -83,16 +84,27 @@ class _DecksViewState extends State<DecksView> {
               ),
             ],
           ),
-          // Unobtrusive settings access (no app bar).
+          // Unobtrusive settings + script access (no app bar).
           Positioned(
             top: 6,
             right: 8,
-            child: IconButton(
-              tooltip: 'Audio settings',
-              iconSize: 18,
-              color: Colors.white24,
-              onPressed: () => showAudioSettings(context, widget.engine),
-              icon: const Icon(Icons.settings),
+            child: Row(
+              children: [
+                IconButton(
+                  tooltip: 'LazerScript editor (opens in its own window)',
+                  iconSize: 18,
+                  color: Colors.white24,
+                  onPressed: () => openScriptEditorWindow(),
+                  icon: const Icon(Icons.terminal),
+                ),
+                IconButton(
+                  tooltip: 'Audio settings',
+                  iconSize: 18,
+                  color: Colors.white24,
+                  onPressed: () => showAudioSettings(context, widget.engine),
+                  icon: const Icon(Icons.settings),
+                ),
+              ],
             ),
           ),
         ],
@@ -265,7 +277,7 @@ class _DeckPanel extends StatelessWidget {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    MixerBox(engine: engine, deck: index),
+                    MixerBox(engine: engine, deck: index, state: s),
                     const SizedBox(width: 8),
                     const FxBox(),
                   ],

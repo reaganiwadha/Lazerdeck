@@ -80,6 +80,11 @@ public:
     void setMid(float knob)  { midKnob_.store(clamp01(knob),  std::memory_order_relaxed); }
     void setHigh(float knob) { highKnob_.store(clamp01(knob), std::memory_order_relaxed); }
 
+    // Current knob positions (for UI feedback so script/automation moves the knobs).
+    float getLow()  const { return lowKnob_.load(std::memory_order_relaxed); }
+    float getMid()  const { return midKnob_.load(std::memory_order_relaxed); }
+    float getHigh() const { return highKnob_.load(std::memory_order_relaxed); }
+
     // Processes two de-interleaved channels in place.
     void process(float* left, float* right, int frames) {
         if (!left || !right || frames <= 0) {

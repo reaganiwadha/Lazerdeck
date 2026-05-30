@@ -314,36 +314,45 @@ void AudioEngine::renderMetronome(float* outputBuffer, unsigned long framesPerBu
 }
 
 void AudioEngine::processDeckMetronome(Deck* deck, DeckMetronome& state, float* outputBuffer, unsigned long framesPerBuffer) {
-    if (!deck->isMetronomeEnabled()) {
-        state.clickCursor = -1;
-        return;
-    }
+    // One-shot tap click (Tap Tempo wizard): starts a click this buffer even
+    // when the grid metronome is disabled.
+    if (deck->consumeMetronomeTick())
+        state.clickCursor = 0;
 
-    float bpm = deck->getBPM();
-    if (bpm <= 0.0f) return;
+    // The beat grid only advances when the metronome is enabled and a tempo is
+    // known. When it isn't, we still render any in-flight one-shot tap click
+    // below, but don't keep a stale beat time around to re-sync against.
+    const bool gridActive = deck->isMetronomeEnabled() && deck->getBPM() > 0.0f;
 
-    double timePerBeat = 60.0 / (double)bpm;
-    double offsetTime = (double)deck->getBeatOffset() / (double)sampleRate;
-    double currentInputTime = deck->getCurrentInputTime();
-    double s = deck->getSpeed();
+    double timePerBeat = 0.0, offsetTime = 0.0, currentInputTime = 0.0, s = 1.0;
+    if (gridActive) {
+        timePerBeat = 60.0 / (double)deck->getBPM();
+        offsetTime = (double)deck->getBeatOffset() / (double)sampleRate;
+        currentInputTime = deck->getCurrentInputTime();
+        s = deck->getSpeed();
 
-    // Re-sync nextBeatTime if it's way off or uninitialized
-    if (state.nextBeatTime < 0 || std::abs(currentInputTime - state.nextBeatTime) > 2.0 * timePerBeat) {
-        int64_t k = (int64_t)ceil((currentInputTime - offsetTime) / timePerBeat - 0.0001);
-        state.nextBeatTime = offsetTime + (double)k * timePerBeat;
+        // Re-sync nextBeatTime if it's way off or uninitialized
+        if (state.nextBeatTime < 0 || std::abs(currentInputTime - state.nextBeatTime) > 2.0 * timePerBeat) {
+            int64_t k = (int64_t)ceil((currentInputTime - offsetTime) / timePerBeat - 0.0001);
+            state.nextBeatTime = offsetTime + (double)k * timePerBeat;
+        }
+    } else {
+        state.nextBeatTime = -1.0;
     }
 
     for (size_t i = 0; i < framesPerBuffer; ++i) {
-        // Check if currentInputTime crossed nextBeatTime
-        // We use a local input time approximation for this buffer
-        double localInputTime = currentInputTime + (double)i / (double)sampleRate * s;
+        if (gridActive) {
+            // Check if currentInputTime crossed nextBeatTime, using a local
+            // input time approximation for this buffer.
+            double localInputTime = currentInputTime + (double)i / (double)sampleRate * s;
 
-        if (localInputTime >= state.nextBeatTime) {
-            state.clickCursor = 0;
-            state.nextBeatTime += timePerBeat;
-            // Catch up if needed
-            while (localInputTime >= state.nextBeatTime) {
+            if (localInputTime >= state.nextBeatTime) {
+                state.clickCursor = 0;
                 state.nextBeatTime += timePerBeat;
+                // Catch up if needed
+                while (localInputTime >= state.nextBeatTime) {
+                    state.nextBeatTime += timePerBeat;
+                }
             }
         }
 

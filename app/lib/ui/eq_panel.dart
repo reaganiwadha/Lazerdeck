@@ -63,10 +63,21 @@ class _FxBoxState extends State<FxBox> {
 }
 
 /// Channel mixer: vertical HI/MID/LOW isolator EQ + volume fader.
+///
+/// The knobs/fader display the engine's *current* values (from the polled
+/// [state]) so LazerScript commands and beat automation visibly move them.
+/// While the user is actively dragging a control we hold a local value for
+/// smoothness, then resync from the engine on release.
 class MixerBox extends StatefulWidget {
   final LazerdeckEngine engine;
   final int deck;
-  const MixerBox({super.key, required this.engine, required this.deck});
+  final DeckState? state;
+  const MixerBox({
+    super.key,
+    required this.engine,
+    required this.deck,
+    required this.state,
+  });
 
   @override
   State<MixerBox> createState() => _MixerBoxState();
@@ -77,9 +88,19 @@ class _MixerBoxState extends State<MixerBox> {
   double _mid = _kCenter;
   double _low = _kCenter;
   double _vol = 1.0;
+  bool _dragging = false;
 
   @override
   Widget build(BuildContext context) {
+    // Follow the engine unless the user is mid-drag.
+    final s = widget.state;
+    if (!_dragging && s != null) {
+      _hi = s.eqHigh;
+      _mid = s.eqMid;
+      _low = s.eqLow;
+      _vol = s.volume;
+    }
+
     return SizedBox(
       width: 64,
       child: Column(
@@ -88,34 +109,50 @@ class _MixerBoxState extends State<MixerBox> {
             label: 'HI',
             value: _hi,
             onChanged: (v) {
-              setState(() => _hi = v);
+              setState(() {
+                _dragging = true;
+                _hi = v;
+              });
               widget.engine.setEqHigh(widget.deck, v);
             },
+            onChangeEnd: () => setState(() => _dragging = false),
           ),
           _EqKnob(
             label: 'MID',
             value: _mid,
             onChanged: (v) {
-              setState(() => _mid = v);
+              setState(() {
+                _dragging = true;
+                _mid = v;
+              });
               widget.engine.setEqMid(widget.deck, v);
             },
+            onChangeEnd: () => setState(() => _dragging = false),
           ),
           _EqKnob(
             label: 'LOW',
             value: _low,
             onChanged: (v) {
-              setState(() => _low = v);
+              setState(() {
+                _dragging = true;
+                _low = v;
+              });
               widget.engine.setEqLow(widget.deck, v);
             },
+            onChangeEnd: () => setState(() => _dragging = false),
           ),
           const SizedBox(height: 10),
           Expanded(
             child: _VolumeFader(
               value: _vol,
               onChanged: (v) {
-                setState(() => _vol = v);
+                setState(() {
+                  _dragging = true;
+                  _vol = v;
+                });
                 widget.engine.setVolume(widget.deck, v);
               },
+              onChangeEnd: () => setState(() => _dragging = false),
             ),
           ),
           const SizedBox(height: 4),
@@ -131,11 +168,13 @@ class _EqKnob extends StatelessWidget {
   final String label;
   final double value; // 0..1
   final ValueChanged<double> onChanged;
+  final VoidCallback? onChangeEnd;
 
   const _EqKnob({
     required this.label,
     required this.value,
     required this.onChanged,
+    this.onChangeEnd,
   });
 
   // Pixels of vertical drag for the full 0..1 sweep.
@@ -150,11 +189,15 @@ class _EqKnob extends StatelessWidget {
         children: [
           GestureDetector(
             behavior: HitTestBehavior.opaque,
-            onDoubleTap: () => onChanged(_kCenter),
+            onDoubleTap: () {
+              onChanged(_kCenter);
+              onChangeEnd?.call();
+            },
             onVerticalDragUpdate: (d) {
               final next = (value - d.delta.dy / _dragRange).clamp(0.0, 1.0);
               if (next != value) onChanged(next);
             },
+            onVerticalDragEnd: (_) => onChangeEnd?.call(),
             child: SizedBox(
               width: 36,
               height: 36,
@@ -234,7 +277,12 @@ class _KnobPainter extends CustomPainter {
 class _VolumeFader extends StatelessWidget {
   final double value; // 0..1
   final ValueChanged<double> onChanged;
-  const _VolumeFader({required this.value, required this.onChanged});
+  final VoidCallback? onChangeEnd;
+  const _VolumeFader({
+    required this.value,
+    required this.onChanged,
+    this.onChangeEnd,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -250,7 +298,11 @@ class _VolumeFader extends StatelessWidget {
           behavior: HitTestBehavior.opaque,
           onPanDown: (d) => set(d.localPosition),
           onPanUpdate: (d) => set(d.localPosition),
-          onDoubleTap: () => onChanged(1.0),
+          onPanEnd: (_) => onChangeEnd?.call(),
+          onDoubleTap: () {
+            onChanged(1.0);
+            onChangeEnd?.call();
+          },
           child: CustomPaint(
             size: const Size(double.infinity, double.infinity),
             painter: _FaderPainter(value),

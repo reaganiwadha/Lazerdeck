@@ -117,6 +117,11 @@ FetchContent_Declare(soundtouch
 FetchContent_MakeAvailable(soundtouch)
 
 # Spectral analysis uses the vendored src/SimpleFFT.hpp (no FFTW dependency).
+#
+# BPM + beat-phase detection uses vendored BTrack (GPL-3, third_party/btrack)
+# built against vendored KissFFT (third_party/kissfft) via -DUSE_KISS_FFT. The
+# upstream libsamplerate dependency was replaced with an inline linear resampler
+# and the 44100 Hz tempo constants were made sample-rate aware (see BTrack.cpp).
 
 # ---------------------------------------------------------------------------
 # The engine library
@@ -132,6 +137,9 @@ set(ENGINE_SRCS
     src/OSCHandler.cpp
     src/Vst3Runtime.cpp
     src/lazerdeck_ffi.cpp
+    third_party/btrack/BTrack.cpp
+    third_party/btrack/OnsetDetectionFunction.cpp
+    third_party/kissfft/kiss_fft.c
     ${OSCPACK_SRCS})
 
 add_library(lazerdeck_engine SHARED ${ENGINE_SRCS})
@@ -139,9 +147,14 @@ add_library(lazerdeck_engine SHARED ${ENGINE_SRCS})
 target_include_directories(lazerdeck_engine PRIVATE
     src
     third_party
+    third_party/btrack
+    third_party/kissfft
     "${oscpack_SOURCE_DIR}"
     "${soundtouch_SOURCE_DIR}/include")
 target_include_directories(lazerdeck_engine PUBLIC include)  # lazerdeck/lazerdeck.h
+
+# BTrack/OnsetDetectionFunction select their FFT backend at compile time.
+target_compile_definitions(lazerdeck_engine PRIVATE USE_KISS_FFT)
 
 target_link_libraries(lazerdeck_engine PRIVATE
     rubberband_lib
