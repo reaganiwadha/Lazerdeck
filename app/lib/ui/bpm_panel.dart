@@ -102,6 +102,8 @@ class BpmControls extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
+        _syncControl(s),
+        const SizedBox(width: 8),
         _pitchControl(s),
         const SizedBox(width: 8),
         _offsetControl(hasBpm ? s! : null),
@@ -133,6 +135,34 @@ class BpmControls extends StatelessWidget {
           onTap: () => _editDialog(context),
         ),
       ],
+    );
+  }
+
+  Widget _syncControl(DeckState? s) {
+    final active = s?.syncActive ?? false;
+    final otherDeck = deck == 0 ? 1 : 0; // simple heuristic for 2 decks
+
+    return _MiniButton(
+      tooltip: active
+          ? 'Sync Active (Source: Deck ${String.fromCharCode(0x41 + (s?.syncSource ?? 0))})'
+          : 'Sync to Deck ${String.fromCharCode(0x41 + otherDeck)}',
+      noBorder: false,
+      lit: active,
+      size: 32, // a bit wider for the text
+      onTap: () {
+        if (active) {
+          engine.setSync(deck, -1);
+        } else {
+          engine.setSync(deck, otherDeck);
+        }
+      },
+      child: Text('SYNC',
+          style: TextStyle(
+            fontFamily: 'bitroad',
+            fontSize: 10,
+            fontWeight: FontWeight.w600,
+            color: active ? _accent : Colors.white60,
+          )),
     );
   }
 

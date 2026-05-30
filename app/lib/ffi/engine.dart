@@ -28,6 +28,8 @@ class DeckState {
   final int loopEnd;
   final int recallStart;
   final int recallEnd;
+  final bool syncActive;
+  final int syncSource;
   final String filepath;
 
   const DeckState({
@@ -50,6 +52,8 @@ class DeckState {
     required this.loopEnd,
     required this.recallStart,
     required this.recallEnd,
+    required this.syncActive,
+    required this.syncSource,
     required this.filepath,
   });
 
@@ -328,6 +332,12 @@ class LazerdeckEngine {
   void clearLoop(int deck) => pushCommand('${_d(deck)} loop_clear');
   void reloop(int deck) => pushCommand('${_d(deck)} reloop');
 
+  /// Set the beat-sync source deck (0-based) for this deck, or -1 to disable.
+  void setSync(int deck, int sourceDeck) {
+    final arg = sourceDeck >= 0 ? sourceDeck + 1 : 0;
+    pushCommand('${_d(deck)} sync $arg');
+  }
+
   void pushCommand(String cmd) {
     final p = cmd.toNativeUtf8();
     try {
@@ -362,6 +372,8 @@ class LazerdeckEngine {
       loopEnd: s.loopEnd,
       recallStart: s.recallStart,
       recallEnd: s.recallEnd,
+      syncActive: s.syncActive != 0,
+      syncSource: s.syncSource,
       filepath: _readFilepath(s),
     );
   }
