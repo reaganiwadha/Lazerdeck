@@ -96,8 +96,58 @@ bool Deck::load(const std::string& filepath, AnalysisDB* db,
     return true;
 }
 
+void Deck::eject() {
+    // Mirror of load()'s reset, minus starting a new loader thread. Bail any
+    // in-flight loader/analysis first so nothing writes the buffer after we clear.
+    analysisCancel.store(true);
+    analyzing.store(false);
+    if (loaderThread.joinable()) loaderThread.join();
+    if (analysisThread.joinable()) analysisThread.join();
+
+    playing.store(false);
+    loading.store(false);
+    currentFrame.store(0);
+    framesAvailable.store(0);
+
+    {
+        std::lock_guard<std::mutex> lock(bufferMutex);
+        buffer = AudioBuffer(2, sampleRate, 0, {});
+    }
+    {
+        std::lock_guard<std::mutex> lock(waveMutex);
+        waveSummary.clear();
+    }
+    _waveEnvSlow = 0.0f;
+    _wavePrevRms = 0.0f;
+
+    bpm.store(0.0f);
+    beatOffset.store(0.0f);
+    bpmManual.store(false);
+
+    loopActive.store(false);
+    loopStart.store(0);
+    loopEnd.store(0);
+    recallStart.store(0);
+    recallEnd.store(0);
+    syncActive.store(false);
+    syncSource.store(-1);
+
+    {
+        std::lock_guard<std::mutex> lock(stretcherMutex);
+        stretcher->reset();
+        stretcher->setTimeRatio(1.0);
+    }
+    speed.store(1.0);
+    currentProcessSpeed = 1.0;
+
+    currentFilepath.clear();
+    currentFileHash = "";
+    pendingResumeSeconds = -1.0;
+    pendingResumePlaying = false;
+}
+
 void Deck::saveAnalysis(AnalysisDB& db) {
-    if (currentFilepath.empty()) return; 
+    if (currentFilepath.empty()) return;
     
     if (currentFileHash == "") {
         currentFileHash = AnalysisDB::computeHash(currentFilepath);

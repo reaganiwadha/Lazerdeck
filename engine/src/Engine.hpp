@@ -182,6 +182,7 @@ private:
     // and the JSON dispatcher (dispatchAction). Decks are 0-based here; beats are
     // 1-based (matching the UI grid / script convention).
     void actLoad(int deck, const std::string& path);
+    void actEject(int deck);
     void actPlay(int deck);
     void actPause(int deck);
     void actStop(int deck);

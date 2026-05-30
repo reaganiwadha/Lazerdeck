@@ -38,6 +38,10 @@ public:
     void saveAnalysis(AnalysisDB& db);
     // Drops this track's cached analysis and runs BPM detection again.
     void reanalyze(AnalysisDB& db);
+    // Unloads the current track: stops playback, joins the loader/analysis
+    // threads, frees the audio buffer + waveform, and resets tempo/loop/sync/
+    // speed back to the empty-deck state. Safe to call with nothing loaded.
+    void eject();
 
     // Triggers
     void addTrigger(int id, float beat);

@@ -21,7 +21,7 @@
 // sketch `{"d1":[…]}` because cross-deck verbs (align) don't belong under a
 // single deck key — each action names its own deck.
 struct ControlAction {
-    std::string action;                 // load|play|pause|stop|seek|speed|
+    std::string action;                 // load|eject|play|pause|stop|seek|speed|
                                         // speed_reset|playjump|bpm|offset|
                                         // nudge_offset|reanalyze|metronome|sync|
                                         // master|eq_low|eq_mid|eq_high|volume|align

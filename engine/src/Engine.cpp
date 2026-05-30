@@ -121,6 +121,14 @@ void Engine::actLoad(int deck, const std::string& path) {
     d->load(path, &analysisDB);
 }
 
+void Engine::actEject(int deck) {
+    Deck* d = getDeck(deck);
+    if (!d) return;
+    clearDeckScript(deck);  // drop automation lanes + script triggers too
+    d->eject();
+    Logger::info("Ejected deck " + std::to_string(deck + 1));
+}
+
 void Engine::actPlay(int deck)  { if (Deck* d = getDeck(deck)) d->play(); }
 void Engine::actPause(int deck) { if (Deck* d = getDeck(deck)) d->pause(); }
 void Engine::actStop(int deck)  { if (Deck* d = getDeck(deck)) { d->pause(); d->setFrame(0); } }
@@ -270,6 +278,9 @@ void Engine::processCommands() {
                             size_t last = remaining.find_last_not_of(" \t\"");
                             actLoad(deckIdx, remaining.substr(first, (last - first + 1)));
                         }
+                    }
+                    else if (action == "eject") {
+                        actEject(deckIdx);
                     }
                     else if (action == "seek") {
                         float seconds;
@@ -624,6 +635,7 @@ void Engine::dispatchAction(const ControlAction& a) {
     else if (v == "pause")        effect = [this, deck]{ actPause(deck); };
     else if (v == "stop")         effect = [this, deck]{ actStop(deck); };
     else if (v == "load")         { if (a.path) { std::string p = *a.path; effect = [this, deck, p]{ actLoad(deck, p); }; } }
+    else if (v == "eject")        effect = [this, deck]{ actEject(deck); };
     else if (v == "seek")         { double s = a.value.value_or(0.0); effect = [this, deck, s]{ actSeekSeconds(deck, s); }; }
     else if (v == "speed")        { double m = a.speed.value_or(1.0); effect = [this, deck, m]{ actSpeed(deck, m); }; }
     else if (v == "speed_reset")  effect = [this, deck]{ actSpeed(deck, 1.0); };
