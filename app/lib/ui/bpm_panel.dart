@@ -86,12 +86,16 @@ class BpmControls extends StatelessWidget {
   final LazerdeckEngine engine;
   final int deck;
   final DeckState? state;
+  final bool isMaster;
+  final VoidCallback onSetMaster;
 
   const BpmControls({
     super.key,
     required this.engine,
     required this.deck,
     required this.state,
+    required this.isMaster,
+    required this.onSetMaster,
   });
 
   @override
@@ -102,6 +106,8 @@ class BpmControls extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
+        _masterControl(),
+        const SizedBox(width: 8),
         _syncControl(s),
         const SizedBox(width: 8),
         _pitchControl(s),
@@ -138,6 +144,30 @@ class BpmControls extends StatelessWidget {
     );
   }
 
+  Widget _masterControl() {
+    final active = isMaster;
+    const masterColor = Color(0xFF00E6FF); // Premium electric cyan/teal
+
+    return _MiniButton(
+      tooltip: active
+          ? 'This deck is the TEMPO MASTER'
+          : 'Set this deck as TEMPO MASTER',
+      noBorder: false,
+      lit: active,
+      litColor: masterColor,
+      size: 28,
+      width: 52,
+      onTap: onSetMaster,
+      child: Text('MASTER',
+          style: TextStyle(
+            fontFamily: 'bitroad',
+            fontSize: 9,
+            fontWeight: FontWeight.w600,
+            color: active ? masterColor : Colors.white38,
+          )),
+    );
+  }
+
   Widget _syncControl(DeckState? s) {
     final active = s?.syncActive ?? false;
     final otherDeck = deck == 0 ? 1 : 0; // simple heuristic for 2 decks
@@ -148,7 +178,8 @@ class BpmControls extends StatelessWidget {
           : 'Sync to Deck ${String.fromCharCode(0x41 + otherDeck)}',
       noBorder: false,
       lit: active,
-      size: 32, // a bit wider for the text
+      size: 28,
+      width: 42,
       onTap: () {
         if (active) {
           engine.setSync(deck, -1);
@@ -351,7 +382,9 @@ class _MiniButton extends StatelessWidget {
   final bool lit;
   final Color? tint;
   final double size;
+  final double? width;
   final bool noBorder;
+  final Color? litColor;
 
   const _MiniButton({
     this.icon,
@@ -361,7 +394,9 @@ class _MiniButton extends StatelessWidget {
     this.lit = false,
     this.tint,
     this.size = 28,
+    this.width,
     this.noBorder = false,
+    this.litColor,
   });
 
   @override
@@ -372,22 +407,26 @@ class _MiniButton extends StatelessWidget {
         borderRadius: BorderRadius.circular(6),
         onTap: onTap,
         child: Container(
-          width: size,
+          width: width ?? size,
           height: size,
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(6),
-            color: lit ? const Color(0x22E0344B) : Colors.transparent,
+            color: lit
+                ? (litColor?.withValues(alpha: 0.13) ?? const Color(0x22E0344B))
+                : Colors.transparent,
             border: noBorder
                 ? null
                 : Border.all(
-                    color: lit ? const Color(0x88E0344B) : Colors.white12),
+                    color: lit
+                        ? (litColor?.withValues(alpha: 0.53) ?? const Color(0x88E0344B))
+                        : Colors.white12),
           ),
           child: Center(
             child: child ??
                 Icon(
                   icon,
                   size: size * 0.55,
-                  color: lit ? _accent : (tint ?? Colors.white60),
+                  color: lit ? (litColor ?? _accent) : (tint ?? Colors.white60),
                 ),
           ),
         ),
