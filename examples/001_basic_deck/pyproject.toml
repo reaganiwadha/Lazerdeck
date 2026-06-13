@@ -1,0 +1,12 @@
+[project]
+name = "examples-001-basic-deck"
+version = "0.1.0"
+description = "Basic Deck Example"
+requires-python = ">=3.8"
+dependencies = [
+    "lazerdeck",
+    "ptpython>=3.0.32",
+]
+
+[tool.uv.sources]
+lazerdeck = { workspace = true }

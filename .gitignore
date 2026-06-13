@@ -44,3 +44,14 @@ pluginterfaces/
 public.sdk/
 tutorials/
 vstgui4/
+
+# Python Virtual Environments
+.venv/
+venv/
+ENV/
+.env/
+
+# Python build artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/

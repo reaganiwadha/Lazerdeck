@@ -9,6 +9,8 @@
 #include <filesystem>
 #include <cstdint>
 #include <cstdio>
+#include <algorithm>
+#include <cctype>
 
 struct AnalysisData {
     float bpm;
@@ -71,11 +73,27 @@ public:
 
     static std::string computeHash(const std::string& filepath) {
         std::error_code ec;
-        auto fileSize = std::filesystem::file_size(filepath, ec);
+        std::filesystem::path absPath = std::filesystem::absolute(filepath, ec);
+        if (ec) {
+            absPath = filepath;
+        }
+        
+        auto fileSize = std::filesystem::file_size(absPath, ec);
         if (ec) return "";
 
-        std::string filename = std::filesystem::path(filepath).filename().string();
-        std::string key = filepath + "|" + filename + "|" + std::to_string(fileSize);
+        std::string normPath = absPath.generic_string();
+        std::string filename = absPath.filename().string();
+
+#if defined(_WIN32)
+        std::transform(normPath.begin(), normPath.end(), normPath.begin(), [](unsigned char c) {
+            return std::tolower(c);
+        });
+        std::transform(filename.begin(), filename.end(), filename.begin(), [](unsigned char c) {
+            return std::tolower(c);
+        });
+#endif
+
+        std::string key = normPath + "|" + filename + "|" + std::to_string(fileSize);
 
         // FNV-1a 64-bit over path+filename+size — fast, no file read needed
         uint64_t hash = 14695981039346656037ULL;

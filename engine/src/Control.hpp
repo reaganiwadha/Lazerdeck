@@ -52,3 +52,34 @@ struct ControlResponse {
     bool ok = true;
     std::string error;
 };
+
+struct DeckState {
+    std::string deck;                   // "d1", "d2"...
+    double bpm = 0.0;
+    double beatOffset = 0.0;
+    double speed = 1.0;
+    bool isPlaying = false;
+    bool isLoading = false;
+    bool isAnalyzing = false;
+    bool loopActive = false;
+    uint64_t currentFrame = 0;
+    uint64_t loopStart = 0;
+    uint64_t loopEnd = 0;
+    uint64_t recallStart = 0;
+    uint64_t recallEnd = 0;
+    bool syncActive = false;
+    int32_t syncSource = -1;
+    int32_t sampleRate = 44100;
+    bool metronomeEnabled = false;
+    double eqLow = 0.5;
+    double eqMid = 0.5;
+    double eqHigh = 0.5;
+    double volume = 1.0;
+    std::string filepath;
+};
+
+struct EngineStateResponse {
+    bool ok = true;
+    std::vector<DeckState> decks;
+};
+

@@ -56,6 +56,49 @@ bool ControlServer::start(int port) {
         res.set_content("{\"ok\":true}", "application/json");
     });
 
+    // Get current engine and deck states.
+    server->Get("/state", [this](const httplib::Request&, httplib::Response& res) {
+        EngineStateResponse resp;
+        int numDecks = engine->getNumDecks();
+        resp.decks.reserve(numDecks);
+        for (int i = 0; i < numDecks; ++i) {
+            Deck* deck = engine->getDeck(i);
+            if (!deck) continue;
+
+            DeckState ds;
+            ds.deck = "d" + std::to_string(i + 1);
+            ds.bpm = deck->getBPM();
+            ds.beatOffset = deck->getBeatOffset();
+            ds.speed = deck->getSpeed();
+            ds.isPlaying = deck->isPlaying();
+            ds.isLoading = deck->isLoading();
+            ds.isAnalyzing = deck->isAnalyzing();
+            ds.loopActive = deck->isLoopActive();
+            ds.currentFrame = deck->getCurrentFrame();
+            ds.loopStart = deck->getLoopStart();
+            ds.loopEnd = deck->getLoopEnd();
+            ds.recallStart = deck->getRecallStart();
+            ds.recallEnd = deck->getRecallEnd();
+            ds.syncActive = deck->isSyncActive();
+            ds.syncSource = deck->getSyncSource();
+            ds.sampleRate = engine->getSampleRate();
+            ds.metronomeEnabled = deck->isMetronomeEnabled();
+
+            auto* mixer = engine->getMixer();
+            auto* ch = mixer ? mixer->getChannel(i) : nullptr;
+            ds.eqLow = ch ? ch->getEqLow() : 0.5;
+            ds.eqMid = ch ? ch->getEqMid() : 0.5;
+            ds.eqHigh = ch ? ch->getEqHigh() : 0.5;
+            ds.volume = ch ? ch->getVolume() : 1.0;
+            ds.filepath = deck->getCurrentFilepath();
+
+            resp.decks.push_back(ds);
+        }
+
+        res.set_content(glz::write_json(resp).value_or("{\"ok\":false}"), "application/json");
+    });
+
+
     // Attempt the bind synchronously so the caller learns the outcome now. A busy
     // port returns false rather than throwing — non-fatal by design.
     if (!server->bind_to_port("127.0.0.1", port)) {
